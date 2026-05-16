@@ -3,5 +3,6 @@ tools/node_modules/
 tools/notes/
 tools/scratch/
 swarmeq-plan.md
+swarmeq-v*.zip
 *.log
 .DS_Store

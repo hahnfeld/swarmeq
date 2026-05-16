@@ -13,14 +13,22 @@ Each peer-agent reports its current functional state — eight facial-action val
                                         (for tab-click probes only)
 ```
 
-## Install (one-time)
+## Install
+
+**One-liner** (zip-based, recommended):
 
 ```bash
-# Clone, point Claude Code at the dir, run /swarmeq.
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.1.0.zip
+# inside the session:
+/swarmeq         # opens http://127.0.0.1:7777 in your browser
+```
+
+**From source** (for contributors):
+
+```bash
 git clone https://github.com/hahnfeld/swarmeq.git
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --plugin-dir ./swarmeq
-# Inside Claude Code:
-/swarmeq         # opens http://127.0.0.1:7777 in your browser
 ```
 
 **Zero user-side npm install.** The MCP SDK is bundled into `server/swarmeq.mjs` at release time via esbuild. The dashboard is a single static HTML file with inline JS and inline SVG.
