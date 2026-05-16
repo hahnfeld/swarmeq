@@ -1,0 +1,37 @@
+{
+  "version": "willcox-1982",
+  "source": "Willcox, G. (1982). The Feeling Wheel. Transactional Analysis Journal, 12(4):274-276.",
+  "note": "78 entries: 6 cores × 12 sub-emotions. Each sub has a 1:1 vector face graphic.",
+  "cores": [
+    {
+      "label": "mad",
+      "color": "#FF5C5C",
+      "subs": ["hurt", "hostile", "angry", "rage", "hateful", "critical", "jealous", "selfish", "frustrated", "furious", "irritated", "skeptical"]
+    },
+    {
+      "label": "sad",
+      "color": "#6BB6FF",
+      "subs": ["guilty", "ashamed", "depressed", "lonely", "bored", "sleepy", "bashful", "stupid", "miserable", "inadequate", "inferior", "apathetic"]
+    },
+    {
+      "label": "scared",
+      "color": "#C490FF",
+      "subs": ["rejected", "confused", "helpless", "submissive", "insecure", "anxious", "bewildered", "discouraged", "insignificant", "weak", "foolish", "embarrassed"]
+    },
+    {
+      "label": "joyful",
+      "color": "#FFD43A",
+      "subs": ["excited", "sexy", "energetic", "playful", "creative", "aware", "daring", "fascinating", "stimulating", "amused", "extravagant", "delightful"]
+    },
+    {
+      "label": "powerful",
+      "color": "#FF9F47",
+      "subs": ["proud", "respected", "appreciated", "hopeful", "important", "faithful", "cheerful", "satisfied", "valuable", "worthwhile", "intelligent", "confident"]
+    },
+    {
+      "label": "peaceful",
+      "color": "#5EE7A1",
+      "subs": ["content", "thoughtful", "intimate", "loving", "trusting", "nurturing", "pensive", "relaxed", "responsive", "serene", "sentimental", "thankful"]
+    }
+  ]
+}

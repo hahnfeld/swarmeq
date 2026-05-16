@@ -1,0 +1,17 @@
+{
+  "name": "swarmeq",
+  "owner": {
+    "name": "swarmeq contributors",
+    "url": "https://github.com/hahnfeld/swarmeq"
+  },
+  "plugins": [
+    {
+      "name": "swarmeq",
+      "source": ".",
+      "description": "Self-reported emotional state dashboard for Claude Code Agent Teams. Localhost-only, zero npm install, MIT.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["agent-teams", "dashboard", "introspection", "mcp", "observability"]
+    }
+  ]
+}

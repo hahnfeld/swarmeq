@@ -1,0 +1,16 @@
+{
+  "name": "swarmeq-tools",
+  "version": "0.1.0",
+  "description": "Maintainer-only build chain for swarmeq. Not shipped to users.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
+}

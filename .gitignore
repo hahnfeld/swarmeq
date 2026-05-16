@@ -1,0 +1,7 @@
+node_modules/
+tools/node_modules/
+tools/notes/
+tools/scratch/
+swarmeq-plan.md
+*.log
+.DS_Store

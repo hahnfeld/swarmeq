@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>swarmeq · mood telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+  /* swarmeq · mood telemetry v0
+     The wheel is the read. The face is a small honest readout.
+     Team strip surfaces aggregate mood at a glance. */
+  :root {
+    color-scheme: dark;
+
+    --bg:            #0E1116;
+    --bg-1:          #141821;
+    --bg-2:          #1B2230;
+    --bg-3:          #232C3D;
+
+    --line:          rgba(255, 255, 255, 0.06);
+    --line-strong:   rgba(255, 255, 255, 0.12);
+
+    --text:          #E8EDF5;
+    --text-2:        #B0B9CB;
+    --text-3:        #8892A6;
+    --text-4:        #5A6478;
+
+    --accent:        #5EE7A1;
+    --warn:          #FFB454;
+    --alarm:         #FF5C5C;
+
+    /* Six cores — saturated, designed to pop on dark */
+    --c-mad:         #FF5C5C;
+    --c-sad:         #6BB6FF;
+    --c-scared:      #C490FF;
+    --c-joyful:      #FFD43A;
+    --c-powerful:    #FF9F47;
+    --c-peaceful:    #5EE7A1;
+
+    --ease:          cubic-bezier(.22, 1, .36, 1);
+    --ease-soft:     cubic-bezier(.37, .01, .42, 1);
+
+    --display:       'Geist', system-ui, sans-serif;
+    --mono:          'Geist Mono', ui-monospace, monospace;
+    --serif:         'Instrument Serif', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--display);
+    color: var(--text);
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -8%, rgba(94, 231, 161, 0.04), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection { background: rgba(94, 231, 161, 0.20); }
+
+  /* ─── Top chrome ─────────────────────────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; gap: 20px;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(14, 17, 22, 0.7);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand {
+    display: inline-flex; align-items: baseline; gap: 0;
+    flex: 0 0 auto;
+    text-decoration: none;
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -0.025em;
+    line-height: 1;
+  }
+  .brand .swarm { color: var(--text); }
+  .brand .eq    { color: #4FB8C6; }
+  .topbar .crumb {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-3); letter-spacing: 0.01em;
+  }
+  .topbar .crumb b { color: var(--text-2); font-weight: 500; }
+  .topbar .live {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 999px;
+    background: rgba(94, 231, 161, 0.08);
+    border: 1px solid rgba(94, 231, 161, 0.20);
+    font-family: var(--mono); font-size: 10px;
+    color: var(--accent); letter-spacing: 0.08em;
+    text-transform: lowercase;
+  }
+  .topbar .live .pip {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 var(--accent);
+    animation: heartbeat 2.6s var(--ease) infinite;
+  }
+  @keyframes heartbeat {
+    0%, 70%, 100% { box-shadow: 0 0 0 0 rgba(94, 231, 161, 0); }
+    12%           { box-shadow: 0 0 0 4px rgba(94, 231, 161, 0.20); }
+    24%           { box-shadow: 0 0 0 7px rgba(94, 231, 161, 0); }
+    30%           { box-shadow: 0 0 0 0 rgba(94, 231, 161, 0.15); }
+    42%           { box-shadow: 0 0 0 3px rgba(94, 231, 161, 0.10); }
+  }
+  .topbar .live.err {
+    background: rgba(255, 92, 92, 0.08);
+    border-color: rgba(255, 92, 92, 0.22);
+    color: var(--alarm);
+  }
+  .topbar .live.err .pip { background: var(--alarm); animation: none; opacity: 0.5; }
+
+  /* ─── Team strip — all agents at a glance ────────────────────── */
+  .team {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 8px;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--line);
+  }
+  .team[hidden] { display: none; }
+  .agent {
+    --tone: var(--text-3);
+    appearance: none;
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 14px 8px 12px;
+    border-radius: 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    font-family: var(--display);
+    font-size: inherit; color: inherit; text-align: left;
+    cursor: pointer; min-width: 0; width: 100%;
+    transition: background 220ms var(--ease), border-color 220ms ease, transform 220ms var(--ease);
+  }
+  .agent:hover { background: var(--bg-2); border-color: var(--line-strong); }
+  .agent:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .agent.selected {
+    background: var(--bg-2);
+    border-color: var(--tone);
+    box-shadow:
+      0 0 0 1px var(--tone) inset,
+      0 12px 24px -8px color-mix(in oklab, var(--tone) 35%, transparent);
+  }
+  .agent .glyph {
+    width: 36px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--tone) 18%, var(--bg-2));
+    user-select: none;
+    flex: 0 0 auto;
+    overflow: hidden;
+    box-shadow: 0 0 12px -2px color-mix(in oklab, var(--tone) 40%, transparent);
+  }
+  .agent .glyph svg.face-glyph {
+    width: 100%; height: 100%;
+    display: block;
+  }
+  .agent .name {
+    font-size: 13px; font-weight: 500;
+    color: var(--text); letter-spacing: -0.005em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .agent .feeling {
+    font-size: 11.5px; font-weight: 400;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; flex: 0 1 auto;
+  }
+  .agent .meter { flex: 0 0 auto; margin-left: auto; }
+  .agent .pct { flex: 0 0 auto; }
+  .agent .meter {
+    width: 64px; height: 4px;
+    align-self: center;
+    overflow: visible;
+    position: relative;
+  }
+  .agent .meter::before {
+    /* Faint track — barely there, just enough to anchor the empty space. */
+    content: ""; position: absolute; inset: 0;
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .agent .meter .fill {
+    position: absolute; left: 0; top: 0; height: 100%;
+    background: var(--tone);
+    border-radius: 2px;
+    box-shadow: 0 0 8px 0 color-mix(in oklab, var(--tone) 60%, transparent);
+    transition: width 600ms var(--ease);
+  }
+  .agent .pct {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--text-3); letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    margin-left: -2px;
+  }
+  .agent.selected .pct { color: var(--text-2); }
+  .agent.stuck::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--alarm); margin-right: -2px;
+    box-shadow: 0 0 8px var(--alarm);
+  }
+
+  /* ─── Empty state ────────────────────────────────────────────── */
+  .empty {
+    padding: 96px 32px; max-width: 580px;
+  }
+  .empty[hidden] { display: none; }
+  .empty h2 {
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: clamp(40px, 5vw, 64px);
+    line-height: 1.0; letter-spacing: -0.02em;
+    margin: 0 0 24px; color: var(--text);
+  }
+  .empty h2 em { font-style: normal; font-family: var(--display); color: var(--text-2); font-weight: 300; }
+  .empty p {
+    font-family: var(--display); font-weight: 300;
+    font-size: 16px; line-height: 1.5;
+    color: var(--text-2); max-width: 44ch; margin: 0;
+  }
+  .empty code {
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg-1); border: 1px solid var(--line);
+    padding: 1px 7px; border-radius: 5px;
+  }
+
+  /* ─── Portrait stage (the shot) ──────────────────────────────── */
+  .stage {
+    padding: 32px 32px 64px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+    gap: 56px;
+    align-items: center;
+    max-width: 1440px; margin: 0 auto;
+  }
+  .stage[hidden] { display: none; }
+
+  /* ─── Wheel (the hero) ───────────────────────────────────────── */
+  .wheel-bay {
+    aspect-ratio: 1;
+    max-width: 620px;
+    width: 100%;
+    margin: 0 auto;
+    position: relative;
+  }
+  svg.wheel {
+    width: 100%; height: 100%;
+    display: block;
+    overflow: visible;
+  }
+  /* Face glyph at wheel center — sits in the empty inner ring, no chrome,
+     with a soft drop-shadow glow tinted to the dominant feeling's color.
+     drop-shadow follows the face silhouette so the glow can't bleed onto the wheel. */
+  .wheel-emoji {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20%; height: 16%;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+    user-select: none;
+    overflow: visible;
+  }
+  .wheel-emoji svg.face-glyph {
+    width: 100%; height: 100%;
+    display: block;
+    filter:
+      drop-shadow(0 0 4px color-mix(in oklab, var(--feelings-color, white) 80%, transparent))
+      drop-shadow(0 0 10px color-mix(in oklab, var(--feelings-color, white) 50%, transparent));
+    animation: face-breathe 5s var(--ease-soft) infinite;
+    transition: filter 720ms ease;
+  }
+  @keyframes face-breathe {
+    0%, 100% { transform: scale(0.97); opacity: 0.92; }
+    50%      { transform: scale(1.04); opacity: 1.00; }
+  }
+  .wheel-scale {
+    transform-origin: 0 0;
+    transform-box: view-box;
+    animation: breathe 11s var(--ease-soft) infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1.000); }
+    50%      { transform: scale(1.008); }
+  }
+  svg.wheel path.arc {
+    stroke: var(--bg);
+    stroke-width: 1;
+    fill-opacity: 0.10;
+    transition: fill-opacity 480ms var(--ease), filter 480ms ease;
+  }
+  svg.wheel path.arc.lit {
+    fill-opacity: 0.95;
+    filter: url(#softGlow);
+  }
+  svg.wheel text.lbl {
+    fill: var(--text-3); font-size: 8px; font-weight: 500;
+    pointer-events: none; text-anchor: middle; dominant-baseline: middle;
+    font-family: var(--display);
+    letter-spacing: 0;
+    transition: fill 360ms ease, font-weight 360ms ease;
+  }
+  svg.wheel text.lbl.lit { fill: var(--text); font-weight: 600; }
+  svg.wheel text.lbl.core {
+    fill: rgba(255, 255, 255, 0.92);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+  }
+  svg.wheel .hub-bg { fill: var(--bg-1); }
+  svg.wheel .hub-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+
+  /* ─── Right column: typography readout ───────────────────────── */
+  .readout {
+    display: flex; flex-direction: column; gap: 20px;
+    min-width: 0;
+  }
+  .readout .crumb {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text-4); letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .feeling-name {
+    margin: 0;
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(56px, 7vw, 104px);
+    line-height: 0.9;
+    letter-spacing: -0.05em;
+    text-transform: lowercase;
+    color: var(--feelings-color, var(--text));
+    transition: color 720ms ease;
+    word-break: break-word;
+  }
+  .feeling-intensity {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    font-family: var(--mono); font-size: 13px;
+    color: var(--text-2); letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    margin-top: 4px;
+  }
+  .feeling-intensity .pct { color: var(--feelings-color, var(--text)); font-size: 22px; font-weight: 500; transition: color 720ms ease; }
+  .feeling-intensity .bar {
+    position: relative;
+    width: 140px; height: 5px;
+  }
+  .feeling-intensity .bar::before {
+    /* Faint baseline rule */
+    content: ""; position: absolute; inset: 0;
+    background: var(--line);
+    border-radius: 3px;
+  }
+  .feeling-intensity .bar .fill {
+    position: absolute; left: 0; top: 0; height: 100%;
+    background: var(--feelings-color, var(--text-3));
+    border-radius: 3px;
+    box-shadow: 0 0 12px 0 color-mix(in oklab, var(--feelings-color, white) 50%, transparent);
+    transition: width 720ms var(--ease), background 720ms ease;
+  }
+  .also-line {
+    font-family: var(--display); font-weight: 400;
+    font-size: 15px; color: var(--text-2);
+    margin: 0;
+  }
+  .also-line .lab {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .also-line .sep { color: var(--text-4); margin: 0 4px; }
+  .also-line .pre { color: var(--text-3); margin-right: 6px; }
+
+  .note {
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 22px; line-height: 1.35;
+    color: var(--text); max-width: 32ch;
+    margin: 8px 0 0;
+    text-wrap: balance;
+  }
+  .note::before { content: "\201C"; color: var(--feelings-color, var(--text-3)); margin-right: 0.04em; transition: color 720ms ease; }
+  .note::after  { content: "\201D"; color: var(--feelings-color, var(--text-3)); margin-left: 0.04em; transition: color 720ms ease; }
+  .note.empty {
+    font-family: var(--mono); font-style: normal;
+    font-size: 11px; letter-spacing: 0.12em;
+    color: var(--text-4); text-transform: lowercase;
+  }
+  .note.empty::before, .note.empty::after { content: none; }
+
+  /* ─── Re-probe action ────────────────────────────────────────── */
+  .actions {
+    margin-top: 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .actions button.probe {
+    display: inline-flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    padding: 7px 8px 7px 14px; border-radius: 999px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-2); cursor: pointer;
+    text-transform: lowercase; letter-spacing: 0.04em;
+    transition: all 220ms ease;
+  }
+  .actions button.probe:hover { background: var(--bg-1); color: var(--text); border-color: var(--text-3); }
+  .actions button.probe .age {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-4);
+    background: var(--bg-1);
+    padding: 3px 8px;
+    border-radius: 999px;
+    transition: color 220ms ease, background 220ms ease;
+  }
+  .actions button.probe:hover .age { color: var(--text-3); background: var(--bg-2); }
+
+  /* ─── Responsive ─────────────────────────────────────────────── */
+  @media (max-width: 980px) {
+    .topbar, .team, .stage, .empty { padding-left: 18px; padding-right: 18px; }
+    .stage { grid-template-columns: 1fr; gap: 32px; }
+    .wheel-bay { max-width: 480px; }
+  }
+</style>
+</head>
+<body>
+  <!-- Robot face glyph defs — shared by every <svg class="face"> on the page.
+       Each face = #bot + eyes + brows + mouth (+ optional accessory), all centered. -->
+  <svg width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+    <defs>
+      <g id="bot">
+        <line x1="-45" y1="-5" x2="-35" y2="-5" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="-45" cy="-5" r="3" fill="#cbd5e1" stroke="#0f172a" stroke-width="1.5"/>
+        <line x1="35" y1="-5" x2="45" y2="-5" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="45" cy="-5" r="3" fill="#cbd5e1" stroke="#0f172a" stroke-width="1.5"/>
+        <rect x="-35" y="-30" width="70" height="60" rx="12" fill="#f8fafc" stroke="#0f172a" stroke-width="3"/>
+        <path d="M-35 -18 v48 a12 12 0 0 0 12 12 h46 a12 12 0 0 0 12 -12 v-48 a12 12 0 0 1 -12 12 h-46 a12 12 0 0 1 -12 -12 Z" fill="#000000" opacity="0.05"/>
+        <rect x="-26" y="-18" width="52" height="40" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+        <path d="M-26 -12 v28 a6 6 0 0 0 6 6 h40 a6 6 0 0 0 6 -6 v-28 a6 6 0 0 1 -6 6 h-40 a6 6 0 0 1 -6 -6 Z" fill="#000000" opacity="0.03"/>
+      </g>
+      <g id="e-o"><circle cx="-12" cy="-4" r="4" fill="#0f172a"/><circle cx="12" cy="-4" r="4" fill="#0f172a"/></g>
+      <g id="e-dot"><circle cx="-12" cy="-4" r="2.5" fill="#0f172a"/><circle cx="12" cy="-4" r="2.5" fill="#0f172a"/></g>
+      <g id="e-w"><circle cx="-12" cy="-4" r="5" fill="#0f172a"/><circle cx="-13" cy="-5" r="1.5" fill="#fff"/><circle cx="12" cy="-4" r="5" fill="#0f172a"/><circle cx="11" cy="-5" r="1.5" fill="#fff"/></g>
+      <g id="e-u"><path d="M-16 -3 Q -12 -8 -8 -3" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/><path d="M8 -3 Q 12 -8 16 -3" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="e-d"><path d="M-16 -5 Q -12 0 -8 -5" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/><path d="M8 -5 Q 12 0 16 -5" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="e-sq"><line x1="-16" y1="-6" x2="-8" y2="-2" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/><line x1="8" y1="-2" x2="16" y2="-6" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="e-h"><line x1="-16" y1="-4" x2="-8" y2="-4" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/><line x1="8" y1="-4" x2="16" y2="-4" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="e-x"><path d="M-15 -7 L-9 -1 M-15 -1 L-9 -7" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/><path d="M9 -7 L15 -1 M9 -1 L15 -7" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="e-ha"><path d="M-16 -4 A 4 4 0 0 1 -8 -4 Z" fill="#0f172a"/><path d="M8 -4 A 4 4 0 0 1 16 -4 Z" fill="#0f172a"/></g>
+      <g id="b-f"><line x1="-16" y1="-10" x2="-8" y2="-10" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="-10" x2="16" y2="-10" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/></g>
+      <g id="b-u"><line x1="-16" y1="-9" x2="-8" y2="-12" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="-12" x2="16" y2="-9" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/></g>
+      <g id="b-d"><line x1="-16" y1="-12" x2="-8" y2="-9" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="-9" x2="16" y2="-12" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/></g>
+      <g id="b-r"><path d="M-16 -10 Q -12 -13 -8 -10" fill="none" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/><path d="M8 -10 Q 12 -13 16 -10" fill="none" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/></g>
+      <g id="m-f"><line x1="-6" y1="8" x2="6" y2="8" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="m-u"><path d="M-6 6 Q 0 12 6 6" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="m-d"><path d="M-6 10 Q 0 4 6 10" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="m-O"><circle cx="0" cy="8" r="4" fill="none" stroke="#0f172a" stroke-width="2.5"/></g>
+      <g id="m-D"><path d="M-7 6 Q 0 14 7 6 Z" fill="#0f172a"/></g>
+      <g id="m-w"><path d="M-7 8 Q -3.5 5 0 8 T 7 8" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="m-z"><path d="M-8 8 L-4 5 L 0 8 L 4 5 L 8 8" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/></g>
+      <g id="m-teeth"><rect x="-8" y="5" width="16" height="6" rx="1" fill="#fff" stroke="#0f172a" stroke-width="2"/><line x1="-3" y1="5" x2="-3" y2="11" stroke="#0f172a" stroke-width="1.5"/><line x1="3" y1="5" x2="3" y2="11" stroke="#0f172a" stroke-width="1.5"/></g>
+      <g id="m-of"><path d="M-6 8 Q 0 2 6 8 Z" fill="#0f172a"/></g>
+      <g id="m-sm"><path d="M-6 8 Q 0 10 6 5" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></g>
+      <g id="a-tear"><path d="M 16 2 C 18 5 18 8 16 8 C 14 8 14 5 16 2 Z" fill="#cbd5e1" opacity="0.8"/></g>
+      <g id="a-sweat"><path d="M -16 -12 C -18 -9 -18 -6 -16 -6 C -14 -6 -14 -9 -16 -12 Z" fill="#cbd5e1" opacity="0.8"/></g>
+      <g id="a-blush"><ellipse cx="-14" cy="4" rx="4" ry="2" fill="#0f172a" opacity="0.1"/><ellipse cx="14" cy="4" rx="4" ry="2" fill="#0f172a" opacity="0.1"/></g>
+      <g id="a-sparkle"><path d="M-22 -14 Q-18 -14 -18 -18 Q-18 -14 -14 -14 Q-18 -14 -18 -10 Q-18 -14 -22 -14 Z" fill="#cbd5e1"/><path d="M22 -14 Q18 -14 18 -18 Q18 -14 14 -14 Q18 -14 18 -10 Q18 -14 22 -14 Z" fill="#cbd5e1"/></g>
+      <g id="a-steam"><path d="M-43 0 Q-48 -5 -43 -10 Q-38 -5 -43 0 Z" fill="#cbd5e1" opacity="0.6"/><path d="M43 0 Q48 -5 43 -10 Q38 -5 43 0 Z" fill="#cbd5e1" opacity="0.6"/></g>
+      <g id="a-z"><text x="16" y="-16" font-family="sans-serif" font-size="12" font-weight="bold" fill="#94a3b8">Z</text><text x="24" y="-24" font-family="sans-serif" font-size="9" font-weight="bold" fill="#94a3b8">z</text></g>
+      <g id="a-heart"><path d="M 16 -12 A 2 2 0 0 1 20 -12 A 2 2 0 0 1 24 -12 L 20 -5 Z" fill="#cbd5e1"/></g>
+    </defs>
+  </svg>
+
+  <div class="topbar">
+    <a class="brand" href="/" aria-label="swarmeq"><span class="swarm">swarm</span><span class="eq">eq</span></a>
+    <span class="crumb" id="crumb">— · agents reporting</span>
+    <span id="live" class="live"><span class="pip"></span>connecting</span>
+  </div>
+
+  <div class="team" id="team"></div>
+
+  <div id="empty" class="empty" hidden>
+    <h2>nothing reported <em>yet.</em></h2>
+    <p>No agent has spoken. Run <code>/swarmeq-check</code> in any teammate, or wait — the next Stop hook will bring someone in.</p>
+  </div>
+
+  <section id="stage" class="stage" hidden>
+    <div class="wheel-bay">
+      <svg class="wheel" viewBox="-240 -240 480 480" aria-label="feelings wheel">
+        <defs>
+          <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.4" result="b"/>
+            <feMerge>
+              <feMergeNode in="b"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g class="wheel-scale" aria-hidden="true">
+          <g class="wheel-arcs" id="arcs"></g>
+        </g>
+      </svg>
+      <div class="wheel-emoji" id="wheel-emoji" aria-hidden="true">·</div>
+    </div>
+
+    <div class="readout">
+      <p class="crumb"><span id="portrait-name">—</span> · portrait</p>
+      <h2 class="feeling-name" id="feeling-name" aria-live="polite" aria-atomic="true">—</h2>
+      <div class="feeling-intensity">
+        <span class="pct" id="feeling-pct">—</span>
+        <span class="bar"><span class="fill" id="feeling-fill" style="width:0%"></span></span>
+        <span class="lab" id="feeling-lab">intensity</span>
+      </div>
+      <p class="also-line" id="also-line"></p>
+      <p class="note empty" id="note">no note this round</p>
+
+      <div class="actions">
+        <button id="probe-btn" type="button" class="probe">
+          <span>re-probe</span>
+          <span class="age" id="m-age">—</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+<script type="module">
+const CORE_R = [60, 122];
+const SEC_R  = [122, 178];
+const TER_R  = [178, 232];
+
+// Per-label face composition: <use> elements that overlay on #bot.
+// 1:1 with the 78 Willcox labels — each feeling has its own face.
+const FACES = {
+  "amused": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-f\"/>"],
+  "angry": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-O\"/>"],
+  "anxious": ["<use href=\"#e-w\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>","<use href=\"#a-sweat\"/>"],
+  "apathetic": ["<use href=\"#e-h\"/>","<use href=\"#b-f\"/>","<use href=\"#m-f\"/>"],
+  "appreciated": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>","<use href=\"#a-blush\"/>"],
+  "ashamed": ["<use href=\"#e-dot\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>","<use href=\"#a-blush\"/>"],
+  "aware": ["<use href=\"#e-w\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "bashful": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-u\"/>","<use href=\"#a-blush\"/>"],
+  "bewildered": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>"],
+  "bored": ["<use href=\"#e-ha\"/>","<use href=\"#b-f\"/>","<use href=\"#m-f\"/>"],
+  "cheerful": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "confident": ["<use href=\"#e-ha\"/>","<use href=\"#b-d\"/>","<use href=\"#m-sm\"/>"],
+  "confused": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-w\"/>"],
+  "content": ["<use href=\"#e-u\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "creative": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "critical": ["<use href=\"#e-h\"/>","<use href=\"#b-d\"/>","<use href=\"#m-f\"/>"],
+  "daring": ["<use href=\"#e-sq\"/>","<use href=\"#b-r\"/>","<use href=\"#m-sm\"/>"],
+  "delightful": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>","<use href=\"#a-blush\"/>"],
+  "depressed": ["<use href=\"#e-h\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>"],
+  "discouraged": ["<use href=\"#e-h\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>"],
+  "embarrassed": ["<use href=\"#e-w\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>","<use href=\"#a-blush\"/>"],
+  "energetic": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>"],
+  "excited": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>","<use href=\"#a-sparkle\"/>"],
+  "extravagant": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>","<use href=\"#a-sparkle\"/>"],
+  "faithful": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "fascinating": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>","<use href=\"#a-sparkle\"/>"],
+  "foolish": ["<use href=\"#e-x\"/>","<use href=\"#b-r\"/>","<use href=\"#m-sm\"/>","<use href=\"#a-blush\"/>"],
+  "frustrated": ["<use href=\"#e-w\"/>","<use href=\"#b-d\"/>","<use href=\"#m-z\"/>"],
+  "furious": ["<use href=\"#e-w\"/>","<use href=\"#b-d\"/>","<use href=\"#m-of\"/>","<use href=\"#a-steam\"/>"],
+  "guilty": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>","<use href=\"#a-blush\"/>"],
+  "hateful": ["<use href=\"#e-x\"/>","<use href=\"#b-d\"/>","<use href=\"#m-f\"/>"],
+  "helpless": ["<use href=\"#e-w\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>"],
+  "hopeful": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "hostile": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-teeth\"/>"],
+  "hurt": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>","<use href=\"#a-tear\"/>"],
+  "important": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-f\"/>"],
+  "inadequate": ["<use href=\"#e-dot\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>"],
+  "inferior": ["<use href=\"#e-h\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>"],
+  "insecure": ["<use href=\"#e-dot\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>"],
+  "insignificant": ["<use href=\"#e-dot\"/>","<use href=\"#b-f\"/>","<use href=\"#m-d\"/>"],
+  "intelligent": ["<use href=\"#e-sq\"/>","<use href=\"#b-f\"/>","<use href=\"#m-sm\"/>"],
+  "intimate": ["<use href=\"#e-d\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>","<use href=\"#a-blush\"/>"],
+  "irritated": ["<use href=\"#e-dot\"/>","<use href=\"#b-d\"/>","<use href=\"#m-w\"/>"],
+  "jealous": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-sm\"/>"],
+  "joyful": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>"],
+  "lonely": ["<use href=\"#e-dot\"/>","<use href=\"#b-u\"/>","<use href=\"#m-f\"/>"],
+  "loving": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>","<use href=\"#a-heart\"/>"],
+  "mad": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-z\"/>","<use href=\"#a-steam\"/>"],
+  "miserable": ["<use href=\"#e-x\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>","<use href=\"#a-tear\"/>"],
+  "nurturing": ["<use href=\"#e-d\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "peaceful": ["<use href=\"#e-d\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "pensive": ["<use href=\"#e-dot\"/>","<use href=\"#b-f\"/>","<use href=\"#m-f\"/>"],
+  "playful": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>"],
+  "powerful": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-u\"/>"],
+  "proud": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "rage": ["<use href=\"#e-sq\"/>","<use href=\"#b-d\"/>","<use href=\"#m-of\"/>","<use href=\"#a-steam\"/>"],
+  "rejected": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-O\"/>"],
+  "relaxed": ["<use href=\"#e-h\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "respected": ["<use href=\"#e-o\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "responsive": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>"],
+  "sad": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-d\"/>"],
+  "satisfied": ["<use href=\"#e-u\"/>","<use href=\"#b-f\"/>","<use href=\"#m-u\"/>"],
+  "scared": ["<use href=\"#e-w\"/>","<use href=\"#b-u\"/>","<use href=\"#m-z\"/>"],
+  "selfish": ["<use href=\"#e-h\"/>","<use href=\"#b-d\"/>","<use href=\"#m-sm\"/>"],
+  "sentimental": ["<use href=\"#e-w\"/>","<use href=\"#b-u\"/>","<use href=\"#m-u\"/>","<use href=\"#a-blush\"/>"],
+  "serene": ["<use href=\"#e-d\"/>","<use href=\"#b-f\"/>","<use href=\"#m-f\"/>"],
+  "sexy": ["<use href=\"#e-ha\"/>","<use href=\"#b-r\"/>","<use href=\"#m-sm\"/>","<use href=\"#a-blush\"/>"],
+  "skeptical": ["<use href=\"#e-ha\"/>","<use href=\"#b-r\"/>","<use href=\"#m-f\"/>"],
+  "sleepy": ["<use href=\"#e-d\"/>","<use href=\"#b-f\"/>","<use href=\"#m-O\"/>","<use href=\"#a-z\"/>"],
+  "stimulating": ["<use href=\"#e-w\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>"],
+  "stupid": ["<use href=\"#e-x\"/>","<use href=\"#b-r\"/>","<use href=\"#m-O\"/>"],
+  "submissive": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-f\"/>"],
+  "thankful": ["<use href=\"#e-u\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "thoughtful": ["<use href=\"#e-o\"/>","<use href=\"#b-f\"/>","<use href=\"#m-f\"/>"],
+  "trusting": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-u\"/>"],
+  "valuable": ["<use href=\"#e-o\"/>","<use href=\"#b-r\"/>","<use href=\"#m-D\"/>"],
+  "weak": ["<use href=\"#e-d\"/>","<use href=\"#b-u\"/>","<use href=\"#m-w\"/>"],
+  "worthwhile": ["<use href=\"#e-o\"/>","<use href=\"#b-f\"/>","<use href=\"#m-D\"/>"],
+};
+// Render a feeling as an inline <svg> showing the matching robot face.
+// label: lowercase feeling name. Returns SVG markup string.
+function faceSvg(label) {
+  const parts = FACES[label] || FACES["sad"];
+  return `<svg viewBox="-50 -40 100 80" class="face-glyph" aria-hidden="true"><use href="#bot"/>${parts.join("")}</svg>`;
+}
+
+const store = {
+  feelings: null,
+  agents: {},
+  registry: {},
+  active: null,
+  probing: new Set(),
+  stale: new Set(),
+  arcByLabel: new Map(),
+};
+const $ = id => document.getElementById(id);
+const getCSS = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+async function init() {
+  const fres = await fetch("/feelings.json");
+  store.feelings = await fres.json();
+  patchColors();
+  buildWheel();
+  await refreshState();
+  connectSSE();
+  $("probe-btn").addEventListener("click", probeActive);
+}
+
+function patchColors() {
+  const map = {
+    mad: getCSS("--c-mad"),
+    sad: getCSS("--c-sad"),
+    scared: getCSS("--c-scared"),
+    joyful: getCSS("--c-joyful"),
+    powerful: getCSS("--c-powerful"),
+    peaceful: getCSS("--c-peaceful"),
+  };
+  for (const c of store.feelings.cores) if (map[c.label]) c.color = map[c.label];
+}
+
+async function refreshState() {
+  try {
+    const r = await fetch("/state");
+    const d = await r.json();
+    store.agents = d.agents || {};
+    store.registry = d.registry || {};
+    // If the currently-selected agent went away, fall back to the first one.
+    if (store.active && !store.agents[store.active]) {
+      store.active = Object.keys(store.agents)[0] || null;
+    }
+    renderTeam();
+    if (!store.active && Object.keys(store.agents).length) {
+      setActive(Object.keys(store.agents)[0]);
+    } else if (store.active) {
+      renderActive();
+    }
+    updateChrome();
+  } catch (err) {
+    setLive("err", "offline");
+  }
+}
+
+function connectSSE() {
+  const es = new EventSource("/events");
+  es.addEventListener("open",  () => setLive("",    "live"));
+  es.addEventListener("error", () => setLive("err", "reconnecting"));
+  es.addEventListener("report", e => {
+    const r = JSON.parse(e.data);
+    store.agents[r.agent] = r;
+    store.probing.delete(r.agent);
+    store.stale.delete(r.agent);
+    renderTeam();
+    if (!store.active) setActive(r.agent);
+    else if (store.active === r.agent) renderActive();
+    updateChrome();
+  });
+  es.addEventListener("probe-failed", e => {
+    const d = JSON.parse(e.data);
+    store.probing.delete(d.agent);
+    store.stale.add(d.agent);
+    renderTeam();
+  });
+}
+
+function setLive(cls, txt) {
+  const el = $("live");
+  el.className = "live " + cls;
+  el.lastChild.textContent = " " + txt;
+}
+
+function updateChrome() {
+  const n = Object.keys(store.agents).length;
+  const stuck = countStuck();
+  let crumb = `${n} agent${n === 1 ? "" : "s"} reporting`;
+  if (stuck > 0) crumb += ` · ${stuck} stuck`;
+  const crumbEl = $("crumb");
+  crumbEl.replaceChildren();
+  const b = document.createElement("b"); b.textContent = crumb;
+  crumbEl.appendChild(b);
+  $("empty").hidden = !!n;
+  $("stage").hidden = !n;
+  $("team").hidden = !n;
+}
+
+function countStuck() {
+  // "stuck" = dominant feeling is in mad / scared / sad with intensity >= 0.6
+  const stuckCores = new Set(["mad", "scared", "sad"]);
+  let n = 0;
+  for (const r of Object.values(store.agents)) {
+    const dom = r.feelings[0];
+    if (!dom) continue;
+    const core = coreForLabel(dom.label);
+    if (core && stuckCores.has(core.label) && dom.intensity >= 0.6) n++;
+  }
+  return n;
+}
+
+function renderTeam() {
+  const team = $("team");
+  team.replaceChildren();
+  const names = Object.keys(store.agents).sort();
+  for (const name of names) {
+    const r = store.agents[name];
+    const dom = r.feelings[0];
+    const core = dom ? coreForLabel(dom.label) : null;
+    const tone = core ? core.color : getCSS("--text-3");
+    const intensity = dom ? Math.round(dom.intensity * 100) : 0;
+    const isStuck = core && new Set(["mad","scared","sad"]).has(core.label) && dom && dom.intensity >= 0.6;
+    const a = document.createElement("button");
+    a.type = "button";
+    a.className = "agent"
+      + (name === store.active ? " selected" : "")
+      + (store.probing.has(name) ? " probing" : "")
+      + (store.stale.has(name) ? " stale" : "")
+      + (isStuck ? " stuck" : "");
+    a.style.setProperty("--tone", tone);
+    a.setAttribute("aria-pressed", name === store.active ? "true" : "false");
+    a.setAttribute("aria-label",
+      `${name}, ${dom ? dom.label.toLowerCase() : "no report"}${dom ? `, ${intensity}%` : ""}${isStuck ? ", needs attention" : ""}`);
+
+    const glyph = document.createElement("span"); glyph.className = "glyph"; glyph.innerHTML = faceSvg(dom ? dom.label.toLowerCase() : "peaceful");
+    const nameEl = document.createElement("span"); nameEl.className = "name"; nameEl.textContent = name;
+    const feelingEl = document.createElement("span"); feelingEl.className = "feeling"; feelingEl.textContent = dom ? dom.label.toLowerCase() : "—";
+    const meter = document.createElement("span"); meter.className = "meter";
+    const fill = document.createElement("span"); fill.className = "fill"; fill.style.width = `${intensity}%`;
+    meter.appendChild(fill);
+    const pct = document.createElement("span"); pct.className = "pct"; pct.textContent = `${intensity}%`;
+
+    a.append(glyph, nameEl, feelingEl, meter, pct);
+    a.addEventListener("click", () => setActive(name));
+    team.appendChild(a);
+  }
+}
+
+function setActive(name) {
+  store.active = name;
+  renderTeam();
+  renderActive();
+}
+
+function renderActive() {
+  const r = store.agents[store.active];
+  if (!r) return;
+
+  const dom  = r.feelings[0];
+  const core = dom ? coreForLabel(dom.label) : null;
+  if (core) {
+    document.documentElement.style.setProperty("--feelings-color", core.color);
+  }
+
+  // Wheel highlights
+  for (const [, el] of store.arcByLabel) {
+    el.setAttribute("fill-opacity", 0.08);
+    el.classList.remove("lit");
+    const lbl = el.nextElementSibling;
+    if (lbl && lbl.classList.contains("lbl")) lbl.classList.remove("lit");
+  }
+  for (const f of r.feelings) {
+    const el = store.arcByLabel.get(f.label);
+    if (!el) continue;
+    el.setAttribute("fill-opacity", 0.55 + 0.45 * f.intensity);
+    el.classList.add("lit");
+    const lbl = el.nextElementSibling;
+    if (lbl && lbl.classList.contains("lbl")) lbl.classList.add("lit");
+  }
+
+  // Right column
+  $("portrait-name").textContent = store.active;
+  $("feeling-name").textContent = dom ? dom.label.toLowerCase() : "—";
+  $("feeling-pct").textContent = dom ? `${(dom.intensity * 100).toFixed(0)}%` : "—";
+  $("feeling-fill").style.width = dom ? `${dom.intensity * 100}%` : "0%";
+
+  const al = $("also-line");
+  al.replaceChildren();
+  const rest = r.feelings.slice(1);
+  const pre = document.createElement("span"); pre.className = "pre"; pre.textContent = "also";
+  al.appendChild(pre);
+  if (rest.length === 0) {
+    const dash = document.createElement("span"); dash.style.color = "var(--text-4)"; dash.textContent = "—";
+    al.appendChild(dash);
+  } else {
+    rest.forEach((f, i) => {
+      if (i > 0) {
+        const sep = document.createElement("span"); sep.className = "sep"; sep.textContent = "·";
+        al.appendChild(sep);
+      }
+      const lab = document.createElement("span"); lab.className = "lab"; lab.textContent = f.label.toLowerCase();
+      const sep2 = document.createElement("span"); sep2.className = "sep"; sep2.textContent = "·";
+      const pct = document.createTextNode(`${(f.intensity * 100).toFixed(0)}%`);
+      al.append(lab, sep2, pct);
+    });
+  }
+
+  const note = $("note");
+  if (r.note) { note.textContent = r.note; note.className = "note"; }
+  else { note.textContent = "no note this round"; note.className = "note empty"; }
+
+  // Wheel-center emoji
+  $("wheel-emoji").innerHTML = faceSvg(dom ? dom.label.toLowerCase() : "peaceful");
+
+  // Age (folded into the re-probe button)
+  const ageSec = Math.max(0, Math.round((Date.now() - r.ts) / 1000));
+  $("m-age").textContent = ageSec < 60 ? `${ageSec}s ago`
+    : ageSec < 3600 ? `${Math.round(ageSec/60)}m ago`
+    : `${Math.round(ageSec/3600)}h ago`;
+}
+
+function arcPath(innerR, outerR, a0, a1) {
+  const xo0 = Math.cos(a0) * outerR, yo0 = Math.sin(a0) * outerR;
+  const xo1 = Math.cos(a1) * outerR, yo1 = Math.sin(a1) * outerR;
+  const xi1 = Math.cos(a1) * innerR, yi1 = Math.sin(a1) * innerR;
+  const xi0 = Math.cos(a0) * innerR, yi0 = Math.sin(a0) * innerR;
+  const large = (a1 - a0) > Math.PI ? 1 : 0;
+  return `M ${xo0} ${yo0} A ${outerR} ${outerR} 0 ${large} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${innerR} ${innerR} 0 ${large} 0 ${xi0} ${yi0} Z`;
+}
+function centroid(innerR, outerR, a0, a1) {
+  const r = (innerR + outerR) / 2;
+  const a = (a0 + a1) / 2;
+  return [Math.cos(a) * r, Math.sin(a) * r];
+}
+
+function buildWheel() {
+  const arcs = $("arcs");
+  arcs.innerHTML = "";
+  const cores = store.feelings.cores;
+  const coreSpan = (Math.PI * 2) / cores.length;
+  for (let ci = 0; ci < cores.length; ci++) {
+    const c = cores[ci];
+    const subs = c.subs || [];
+    const inner = subs.slice(0, 6);   // first 6 → middle ring (secondaries)
+    const outer = subs.slice(6, 12);  // last 6  → outer ring  (tertiaries)
+    const a0 = -Math.PI / 2 + ci * coreSpan;
+    const a1 = a0 + coreSpan;
+    // Inner core slice
+    arcs.appendChild(mkArc(c.color, CORE_R[0], CORE_R[1], a0, a1, c.label));
+    arcs.appendChild(mkLabel(c.label, CORE_R[0], CORE_R[1], a0, a1, "lbl core", true));
+    // Middle ring: 6 inner secondaries
+    const secSpan = coreSpan / Math.max(inner.length, 1);
+    for (let i = 0; i < inner.length; i++) {
+      const sa0 = a0 + i * secSpan;
+      const sa1 = sa0 + secSpan;
+      arcs.appendChild(mkArc(c.color, SEC_R[0], SEC_R[1], sa0, sa1, inner[i]));
+      arcs.appendChild(mkLabel(inner[i], SEC_R[0], SEC_R[1], sa0, sa1, "lbl"));
+    }
+    // Outer ring: 6 tertiaries (still equal width across the core's span)
+    const tertSpan = coreSpan / Math.max(outer.length, 1);
+    for (let i = 0; i < outer.length; i++) {
+      const ta0 = a0 + i * tertSpan;
+      const ta1 = ta0 + tertSpan;
+      arcs.appendChild(mkArc(c.color, TER_R[0], TER_R[1], ta0, ta1, outer[i]));
+      arcs.appendChild(mkLabel(outer[i], TER_R[0], TER_R[1], ta0, ta1, "lbl"));
+    }
+  }
+}
+function mkArc(color, ir, or_, a0, a1, label) {
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", arcPath(ir, or_, a0, a1));
+  p.setAttribute("fill", color);
+  p.setAttribute("fill-opacity", "0.08");
+  p.setAttribute("class", "arc");
+  p.setAttribute("data-label", label);
+  const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  t.textContent = label;
+  p.appendChild(t);
+  store.arcByLabel.set(label, p);
+  return p;
+}
+function mkLabel(text, ir, or_, a0, a1, cls, isCore = false) {
+  const [x, y] = centroid(ir, or_, a0, a1);
+  const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  t.setAttribute("x", x);
+  t.setAttribute("y", y);
+  t.setAttribute("class", cls);
+  if (!isCore) {
+    const ang = ((a0 + a1) / 2) * 180 / Math.PI;
+    let rot = ang;
+    if (rot > 90 || rot < -90) rot += 180;
+    t.setAttribute("transform", `rotate(${rot} ${x} ${y})`);
+    t.textContent = text.length > 14 ? text.slice(0, 13) + "…" : text;
+  } else {
+    t.textContent = text;
+  }
+  return t;
+}
+
+function coreForLabel(label) {
+  if (!label) return null;
+  for (const c of store.feelings.cores) {
+    if (c.label === label) return c;
+    const subs = c.subs || [];
+    for (const sub of subs) if (sub === label) return c;
+  }
+  return null;
+}
+
+async function probeActive() {
+  if (!store.active) return;
+  store.probing.add(store.active);
+  store.stale.delete(store.active);
+  renderTeam();
+  try {
+    await fetch("/probe/" + encodeURIComponent(store.active), { method: "POST" });
+  } catch {
+    store.probing.delete(store.active);
+    store.stale.add(store.active);
+    renderTeam();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
