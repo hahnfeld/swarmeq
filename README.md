@@ -2,9 +2,42 @@
 
 **A self-reported emotional state dashboard for Claude Code Agent Teams.**
 
-Each peer-agent reports its current functional state — 1–4 Willcox 1982 feelings with intensities — and the dashboard renders one tab per agent: a stylized SVG face (derived from the dominant feeling) plus the full Willcox wheel with intensity highlights. Agents are probed automatically on their Stop hook (rate-limited to at most one probe per 90s), so the dashboard stays warm without any manual action.
+## Why swarmeq
 
-![dashboard preview](tools/scratch/screenshot-01.png)
+When you run a Claude Code Agent Team, each teammate has its own context window. They diverge silently — one gets stuck on a bad assumption, another loses the thread, a third is making real progress. From the outside, you can't tell. By the time you notice, hours of API spend have gone to a peer that was confused from minute three.
+
+swarmeq fixes the blindness. Every ~90 seconds, each teammate takes about 5 seconds to jot down how it's actually doing — `frustrated`, `confused`, `eager`, `confident` — with intensities and one sentence of context. A live dashboard in your browser shows the whole team at a glance, plus a per-agent detail view.
+
+**Use it to:** spot a stuck teammate before it burns hours, verify the team is healthy before kicking off a long task, or debug after the fact why a run diverged from what you expected.
+
+It's an observability tool, not a control plane — swarmeq watches; it never interrupts.
+
+**Individual view** — one teammate's most recent state, with the Willcox feelings wheel lit by intensity:
+
+![individual view](docs/screenshot-individual.png)
+
+**Team view** — the union of every living teammate's most recent state, plus a team sentiment % tracked over time:
+
+![team view](docs/screenshot-team.png)
+
+## What "Agent Teams" is (and why you need it)
+
+Claude Code **Agent Teams** is an experimental feature, gated behind the env var `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. It lets you spawn multiple peer Claude Code sessions that work together as a team. Each teammate has its own context window, memory, system prompt, and tool set, and they can message each other directly.
+
+This is different from Claude Code's **Task** tool. Task spawns short-lived sub-conversations *inside* a single session that report a summary back to a parent. Agent Teams spawns full *peer* sessions that live independently — each gets its own session ID, can outlive any one turn, and is addressable by name.
+
+**The human-team analogy.** A real team is a group of individuals with their own perspectives, working memory, and emotional state, collaborating by talking to each other. Agent Teams mirrors that structurally. Where the analogy bends: AI teammates are clones of the same underlying model, so the divergence between them comes from their independent context and task assignments — not from different expertise the way a backend engineer differs from a designer.
+
+**Why swarmeq needs Agent Teams.** With no peers, there's nothing to observe. swarmeq still runs fine on a solo session (you just get a team of one), but it shines when you have multiple peers that can diverge.
+
+## Using it
+
+1. Start Claude Code with Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`).
+2. Inside the session, run `/swarmeq-dashboard`. A browser tab opens to the dashboard.
+3. Work normally — yourself, your teammates, whoever. After each agent finishes a turn, that agent auto-reports its state within ~30 seconds.
+4. Click any teammate's name on the dashboard for their full detail. Switch to the **team** view for the union wheel and team-wide sentiment %.
+
+That's it. No buttons to push, no commands to remember.
 
 ```
   Agent ──MCP stdio──> swarmeq.mjs ──HTTP/SSE──> dashboard.html (browser)
@@ -93,6 +126,11 @@ cd tools && npm install && node build.mjs
 ## Status: 0.2.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
+
+## Learn more
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the daemon, MCP children, probe forks, and browser fit together. Read this if you want the under-the-hood picture.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to develop on the plugin: where the source lives, how the build works, how to test locally.
 
 ## License
 
