@@ -5,4 +5,4 @@ allowed-tools: Bash
 
 !node "${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs" dashboard
 
-The dashboard auto-populates as teammates report state via the `swarmeq.report` MCP tool. If no agents appear, run `/swarmeq-check` in any teammate to seed.
+The dashboard auto-populates as teammates report state. Each agent is probed automatically on its Stop hook (rate-limited to at most one probe per 90s).

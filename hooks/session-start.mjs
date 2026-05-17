@@ -9,11 +9,15 @@ const REG = path.join(dir, "registry.json");
 
 const sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
 
-// Detached-spawn `swarmeq dashboard`. If nothing's bound, it binds 7777 and
-// opens the browser. If something IS bound, it sees the active port, opens
-// the browser, and exits — `open <url>` is idempotent on macOS (focuses
-// the existing tab). Either way the user lands on the dashboard the moment
-// their session starts.
+// Probe forks of agents re-enter this hook on session start. Don't register
+// them as separate agents and don't open another browser tab.
+if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
+
+// Detached-spawn `swarmeq dashboard`. If nothing's bound, it forks the
+// daemon and opens the browser. If something IS bound, it sees the active
+// port, opens the browser, and exits — `open <url>` is idempotent on macOS
+// (focuses the existing tab). Either way the user lands on the dashboard
+// the moment their session starts.
 function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;

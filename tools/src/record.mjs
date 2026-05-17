@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { AGENT_FILE, PORT_FILE, stateDir, writeAtomic } from "./paths.mjs";
+import { AGENT_FILE, PORT_FILE, REGISTRY_FILE, stateDir, writeAtomic } from "./paths.mjs";
 import { bindState } from "./bind.mjs";
 import { broadcast } from "./sse.mjs";
 import { validateReport } from "./validate.mjs";
@@ -29,7 +29,7 @@ export async function record(raw) {
     // Only the bound process owns sentiment.jsonl. MCP children forward to
     // /ingest, which calls record() again in the bound process — so we land
     // in this branch exactly once per logical report.
-    snapshotAndBroadcast(readAllReports());
+    snapshotAndBroadcast(readLivingReports());
   } else {
     // Re-read .port each time so a long-lived MCP child finds the dashboard
     // whenever it appears (or moves), without needing to be restarted.
@@ -37,6 +37,21 @@ export async function record(raw) {
     if (port) forwardToDashboard(port, report).catch(() => {});
   }
   return report;
+}
+
+// Team-view rule: only "living" agents (those present in registry.json,
+// maintained by SessionStart/SessionEnd hooks) may contribute to team
+// aggregates. Drops report files left behind when SessionEnd didn't run
+// before the sweep reaped them.
+export function readLivingReports() {
+  let reg = {};
+  try { reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
+  const all = readAllReports();
+  const out = {};
+  for (const name of Object.keys(all)) {
+    if (Object.prototype.hasOwnProperty.call(reg, name)) out[name] = all[name];
+  }
+  return out;
 }
 
 

@@ -9,8 +9,8 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 import { bindState } from "./bind.mjs";
-import { addClient, broadcast } from "./sse.mjs";
-import { record, readAllReports } from "./record.mjs";
+import { addClient } from "./sse.mjs";
+import { record, readLivingReports } from "./record.mjs";
 import { startSweepTimer } from "./sweep.mjs";
 import { computeSentiment, readSentimentHistory } from "./sentiment.mjs";
 
@@ -36,16 +36,12 @@ async function handle(req, res) {
     if (req.method === "GET" && pn === "/feelings.json")               return serveFile(res, feelingsFile(), "application/json");
     if (req.method === "GET" && pn === "/events")                      return addClient(req, res);
     if (req.method === "GET" && pn === "/state")                       return serveJSON(res, snapshot());
+    if (req.method === "GET" && pn === "/healthz")                     return serveJSON(res, { service: "swarmeq", pid: process.pid });
     if (req.method === "GET" && pn === "/history") {
       const lim = Math.max(1, Math.min(2000, parseInt(u.searchParams.get("limit") || "500", 10) || 500));
       return serveJSON(res, { points: readSentimentHistory(lim) });
     }
     if (req.method === "POST" && pn === "/ingest")                     return ingest(req, res);
-    if (req.method === "POST" && pn === "/probe")                      return probeAll(res);
-    if (req.method === "POST" && pn.startsWith("/probe/")) {
-      const agent = decodeURIComponent(pn.slice("/probe/".length));
-      return probe(res, agent);
-    }
     // Static assets from dashboard/ (logo.png, etc). Path is sanitized: only
     // a single filename with a known image extension, no traversal.
     if (req.method === "GET" && /^\/[a-zA-Z0-9._-]+\.(png|jpe?g|svg|webp|gif|ico)$/.test(pn)) {
@@ -84,7 +80,9 @@ function serveJSON(res, data) {
 function snapshot() {
   let registry = {};
   try { registry = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
-  const agents = readAllReports();
+  // Living agents only: stale report files for vanished sessions never
+  // contribute to the team view or per-agent tabs.
+  const agents = readLivingReports();
   return { agents, registry, sentiment: computeSentiment(agents), ts: Date.now() };
 }
 
@@ -118,28 +116,3 @@ function ingest(req, res) {
   });
 }
 
-async function probe(res, agent) {
-  res.writeHead(202, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ accepted: true, agent }));
-  try {
-    const { startProbe } = await import("./probe.mjs");
-    // startProbe broadcasts probe-failed on its own error paths.
-    startProbe(agent).catch(() => {});
-  } catch (err) {
-    broadcast("probe-failed", { agent, reason: `probe module: ${err.message}` });
-  }
-}
-
-async function probeAll(res) {
-  let agents = [];
-  try {
-    const { startProbeAll } = await import("./probe.mjs");
-    agents = startProbeAll();
-  } catch (err) {
-    res.writeHead(500, { "Content-Type": "text/plain" });
-    res.end(`probe-all failed: ${err.message}\n`);
-    return;
-  }
-  res.writeHead(202, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ accepted: true, agents }));
-}

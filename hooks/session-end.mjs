@@ -7,6 +7,10 @@ const REG = path.join(dir, "registry.json");
 
 const sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
 
+// Probe forks share the parent agent's name. If we let SessionEnd fire here,
+// the probe's exit would yank the real agent's entry out of the registry.
+if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
+
 let body = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (c) => { body += c; });

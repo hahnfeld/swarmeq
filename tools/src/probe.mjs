@@ -10,7 +10,7 @@ const PROBE_TIMEOUT_MS = 30_000;
 export async function startProbe(agent) {
   const entry = lookupAgent(agent);
   if (!entry || !entry.session_id) {
-    const reason = `no registered session for agent "${agent}" — run /swarmeq-check from that agent first`;
+    const reason = `no registered session for agent "${agent}"`;
     broadcast("probe-failed", { agent, reason });
     throw new Error(reason);
   }
@@ -107,17 +107,4 @@ function lookupAgent(agent) {
   } catch {
     return null;
   }
-}
-
-// Fire startProbe() for every registered agent. Returns the agent names
-// that were dispatched. Per-agent failures broadcast probe-failed and are
-// not re-thrown, so one bad session does not block the rest.
-export function startProbeAll() {
-  let reg = {};
-  try { reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
-  const agents = Object.keys(reg);
-  for (const agent of agents) {
-    startProbe(agent).catch(() => {});
-  }
-  return agents;
 }

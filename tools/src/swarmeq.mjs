@@ -23,23 +23,60 @@ async function cmdMcp() {
 }
 
 async function cmdDashboard() {
-  const active = await readActivePort();
-  if (active) {
-    const url = `http://127.0.0.1:${active}`;
-    process.stdout.write(`swarmeq dashboard: already running at ${url}\n`);
-    openBrowser(url);
-    return;
+  // Foreground command — must never block. The slash command invokes us
+  // synchronously via `!node ... dashboard`; if we held the port here we'd
+  // stall Claude Code's UI until the user killed the dashboard. So if no
+  // daemon is running we fork one detached and exit as soon as it's reachable.
+  let active = await readActivePort();
+  let spawnedDaemon = false;
+  if (!active) {
+    spawnDaemon();
+    spawnedDaemon = true;
+    active = await waitForPort(3000);
   }
+  if (!active) {
+    process.stderr.write("swarmeq dashboard: daemon did not start within 3s; try `node server/swarmeq.mjs doctor`\n");
+    process.exit(1);
+  }
+  const url = `http://127.0.0.1:${active}`;
+  process.stdout.write(`swarmeq dashboard: ${spawnedDaemon ? "started" : "already running"} at ${url}\n`);
+  openBrowser(url);
+}
+
+async function cmdDaemon() {
+  // Internal subcommand — the long-lived background process that actually
+  // binds the port and serves the dashboard. Spawned detached from
+  // `cmdDashboard` and from the session-start hook.
   const s = await ensureBind();
   if (!s.bound) {
-    process.stdout.write(`swarmeq dashboard: running at ${s.url}\n`);
-    openBrowser(s.url);
+    // Lost the race — another daemon already owns the port. Just exit.
     return;
   }
-  process.stdout.write(`swarmeq dashboard: bound ${s.url}\n`);
-  openBrowser(s.url);
-  // Keep the foreground process alive.
+  // Hold the port forever.
   await new Promise(() => {});
+}
+
+function spawnDaemon() {
+  try {
+    const child = spawn(process.execPath, [process.argv[1], "_daemon"], {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+    child.unref();
+  } catch (err) {
+    process.stderr.write(`swarmeq dashboard: failed to spawn daemon: ${err.message}\n`);
+  }
+}
+
+async function waitForPort(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const p = await readActivePort();
+    if (p) return p;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
 }
 
 function openBrowser(url) {
@@ -60,27 +97,22 @@ async function main() {
   switch (SUB) {
     case "mcp":       return cmdMcp();
     case "dashboard": return cmdDashboard();
-    case "check":     return (await import("./check.mjs")).runCheck();
+    case "_daemon":   return cmdDaemon();
     case "probe": {
+      // Internal: invoked by the Stop hook. Forks a Claude session that
+      // calls swarmeq.report once and exits. Fire-and-forget from the hook;
+      // any failure broadcasts probe-failed to the dashboard.
       const agent = process.argv[3];
       if (!agent) { process.stderr.write("usage: swarmeq probe <agent>\n"); process.exit(2); }
-      const { startProbe } = await import("./probe.mjs");
-      return startProbe(agent);
-    }
-    case "probe-all": {
-      // Discover the dashboard so probe-failed broadcasts have a listener,
-      // mirroring how cmdMcp avoids binding its own port.
       await discoverDashboard();
-      const { startProbeAll } = await import("./probe.mjs");
-      const agents = startProbeAll();
-      process.stdout.write(`swarmeq probe-all: dispatched ${agents.length} agent${agents.length === 1 ? "" : "s"}${agents.length ? " (" + agents.join(", ") + ")" : ""}\n`);
+      const { startProbe } = await import("./probe.mjs");
+      try { await startProbe(agent); } catch { /* error already broadcast */ }
       return;
     }
-    case "poll":      return (await import("./ops.mjs")).configurePoll(process.argv[3]);
     case "stop":      return (await import("./ops.mjs")).stopServer();
     case "doctor":    return (await import("./doctor.mjs")).runDoctor();
     default:
-      process.stderr.write("usage: swarmeq <mcp|dashboard|check|probe|probe-all|poll|stop|doctor>\n");
+      process.stderr.write("usage: swarmeq <mcp|dashboard|stop|doctor>\n");
       process.exit(2);
   }
 }

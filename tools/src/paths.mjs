@@ -29,7 +29,6 @@ export function stateDir() {
 
 export const PORT_FILE = () => path.join(stateDir(), ".port");
 export const PID_FILE = () => path.join(stateDir(), ".pid");
-export const POLL_FILE = () => path.join(stateDir(), ".poll");
 export const REGISTRY_FILE = () => path.join(stateDir(), "registry.json");
 export const AGENT_FILE = (agent) => path.join(stateDir(), `${sanitizeAgent(agent)}.json`);
 export const SENTIMENT_FILE = () => path.join(stateDir(), "sentiment.jsonl");
