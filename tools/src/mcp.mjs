@@ -33,7 +33,7 @@ const TOOL = {
 
 export async function startMcp() {
   const server = new Server(
-    { name: "swarmeq", version: "0.1.0" },
+    { name: "swarmeq", version: "0.2.0" },
     { capabilities: { tools: {} } },
   );
 

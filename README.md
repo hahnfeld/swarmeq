@@ -19,7 +19,7 @@ Each peer-agent reports its current functional state — 1–4 Willcox 1982 feel
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.1.0.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.2.0.zip
 # inside the session:
 /swarmeq         # opens http://127.0.0.1:7777 in your browser
 ```
@@ -37,7 +37,7 @@ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --plugin-dir ./swarmeq
 
 - Node ≥ 20 (already required by Claude Code)
 - Claude Code v2.1.117+ with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set
-- macOS, Linux, or Windows (tested on macOS ARM; others best-effort in 0.1.0)
+- macOS, Linux, or Windows (tested on macOS ARM; others best-effort)
 
 ## Slash commands
 
@@ -92,9 +92,9 @@ cd tools && npm install && node build.mjs
 # → produces server/swarmeq.mjs (~600 KB ESM bundle, MCP SDK inlined)
 ```
 
-## Status: 0.1.0
+## Status: 0.2.0
 
-Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested in 0.1.0 — file issues if anything breaks.
+Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
 ## License
 

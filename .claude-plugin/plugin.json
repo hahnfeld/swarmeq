@@ -1,6 +1,6 @@
 {
   "name": "swarmeq",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-reported emotional state dashboard for Claude Code Agent Teams.",
   "license": "MIT",
   "author": {

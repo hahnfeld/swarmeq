@@ -1,5 +1,22 @@
 # swarmeq changelog
 
+## 0.2.0 — team dashboard + reliability
+
+### Added
+- Team-level dashboard at `/team` with a topbar `individual | team` toggle. Union wheel (cell lit if any agent's most-recent report names it, opacity = max intensity across agents). Big team sentiment % (positive intensities / total valenced; 50% = neutral) with a diverging negative/neutral/positive bar. Sentiment-over-time SVG chart with HH:MM ticks, polarity-colored areas split at the 50% baseline, and small ▲ green (join) / ▼ red (leave) markers on the x-axis at each `agentCount` change. Team strip hides on `/team`.
+- `swarmeq probe-all` CLI, `POST /probe` HTTP endpoint, and dashboard topbar "probe all N" button that fan out `startProbe()` across every entry in `registry.json`.
+- Sentiment history persisted to `sentiment.jsonl` in `stateDir/` (capped at 1000 lines), exposed via `GET /history?limit=N` and pushed live via SSE `sentiment` events.
+- Stale-agent sweep: a 30s timer in the bound process deletes per-agent report files older than 10 min and broadcasts `agent-removed` for files that vanished externally (the `SessionEnd` hook unlinks them). Dashboard drops the agent from the team strip, the team wheel, and the sentiment chart.
+- Re-probe UX: button now shows `probing…` / `failed` states and surfaces the server's `probe-failed` reason inline; portrait "Xs ago" updates every second; `.agent.probing` / `.agent.stale` finally have matching CSS.
+- Auto-open: `SessionStart` hook detached-spawns `swarmeq dashboard`, so the browser pops up the moment Claude Code starts (idempotent on macOS — focuses the existing tab).
+
+### Changed (breaking)
+- The `face` field (8 facial-action values) is removed from the `report` MCP tool schema, ingest validation, the introspection prompt, and `/swarmeq-check`. Nothing read it — the dashboard's robot-face glyph is derived from the dominant feeling label. Pre-existing on-disk reports with a `face` block still load.
+
+### Fixed
+- Dashboard refresh + perceived `/swarmeq-check` delay: `cmdMcp` no longer greedily binds 7778+ when 7777 is taken. Previously every Claude Code session became its own private dashboard and broadcast SSE events into a void no one was reading; now the MCP child only discovers the active port and `record()` re-reads `.port` lazily, so long-lived children forward to whichever dashboard is alive.
+- `/swarmeq-check` defaults the agent name to the literal string `lead` instead of emitting the full session UUID when `CLAUDE_AGENT_NAME` isn't set.
+
 ## 0.1.0 — initial release
 
 - Claude Code plugin: 5 slash commands (`/swarmeq`, `/swarmeq-check`, `/swarmeq-poll`, `/swarmeq-stop`, `/swarmeq-doctor`).

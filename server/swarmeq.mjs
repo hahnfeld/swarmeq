@@ -16772,7 +16772,7 @@ __export(mcp_exports, {
 });
 async function startMcp() {
   const server = new Server(
-    { name: "swarmeq", version: "0.1.0" },
+    { name: "swarmeq", version: "0.2.0" },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [TOOL] }));
