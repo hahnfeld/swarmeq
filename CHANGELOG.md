@@ -1,5 +1,16 @@
 # swarmeq changelog
 
+## 0.3.5 — team-subagent visibility fixes
+
+### Fixed
+- Probes for team subagents no longer fail with `No conversation found with session ID …`. The `claude --resume <sid>` lookup is project-scoped: it resolves the session under the project derived from the spawn's CWD. The probe previously inherited the daemon's CWD (typically the directory the user ran `/swarmeq-dashboard` from), so a team subagent registered with a different `cwd` was invisible to resume even when its JSONL existed on disk. The probe now spawns `claude` with `cwd: entry.cwd` from the registry, with a fallback to inheriting if the recorded directory has since been deleted.
+- `SessionStart` no longer opens a browser tab when a team fans out parallel subagents. Each subagent's hook used to race past the port-file check before the first daemon bound, so every concurrent subagent invoked the `dashboard` subcommand and `openBrowser()` fired once per agent. The hook now always invokes `_daemon` (never `dashboard`); the browser is only opened by the explicit `/swarmeq-dashboard` slash command.
+- The "live dashboard tab flips to reconnecting whenever a new subagent starts" symptom is gone. The `SessionStart` stale-daemon check now compares plugin roots via `fs.realpathSync`, so symlink resolution differences and `/var` vs `/private/var` drift between parent and subagent processes no longer trip the kill-and-respawn path.
+- `probe-no-report` events now include the model's actual prose response (`modelResult`, capped at 1KB). When forked Claude exits 0 without calling `mcp__swarmeq__report`, the log now tells us whether the model didn't see the tool, refused to call it, or answered in narrative — previously we only had envelope metadata. Disambiguates the in-the-wild "probe succeeded but produced no report" failure mode.
+
+### Added
+- Integration tests for `startProbe` using a fake `claude` binary on `PATH`. New cases cover the `probe-no-report` `modelResult` capture, the per-entry `cwd` getting passed to spawn, and graceful fallback when `entry.cwd` no longer exists. 93 tests pass on Node 22+.
+
 ## 0.3.4 — dashboard-empty fixes + test suite
 
 ### Fixed

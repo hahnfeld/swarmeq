@@ -107,9 +107,16 @@ export async function startProbe(agent: string): Promise<void> {
 
   const BUF_CAP = 128 * 1024; // 128KB per stream — plenty for a single probe result, prevents OOM
   const startedAt = Date.now();
+  // `claude --resume <sid>` only finds the JSONL when the spawn's CWD maps
+  // to the same project directory that recorded the session. Without this,
+  // the probe inherits the daemon's CWD (typically the dir the user ran
+  // /swarmeq-dashboard from) and team subagents registered with a different
+  // cwd fail with "No conversation found". Fall back to inheriting if the
+  // recorded cwd has since been deleted.
+  const probeCwd = entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : undefined;
   return new Promise<void>((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
-    const child = spawn("claude", args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
 
     let stdout = "", stderr = "";
     let stdoutTrunc = false, stderrTrunc = false;
@@ -159,24 +166,29 @@ export async function startProbe(agent: string): Promise<void> {
         logProbe(agent, "probe-failed", { reason });
         return reject(new Error(reason));
       }
-      // Model-pin verification: parse the JSON envelope and confirm.
-      try {
-        const r = JSON.parse(stdout);
-        const got = r?.model || r?.system?.model || r?.init?.model;
+      // Parse the JSON envelope once: used for model-pin verification AND
+      // for the probe-no-report diagnostic below. Non-JSON output is fine —
+      // both branches degrade to "skip the check" silently.
+      let envelope: { model?: string; system?: { model?: string }; init?: { model?: string }; result?: unknown } | null = null;
+      try { envelope = JSON.parse(stdout); } catch { /* not JSON, that's ok */ }
+      if (envelope) {
+        const got = envelope.model || envelope.system?.model || envelope.init?.model;
         if (got && got !== model && !got.includes(model) && !model.includes(got)) {
           logProbe(agent, "model-mismatch", { expected: model, got });
         }
-      } catch {
-        // Non-JSON output is fine when --output-format=json wraps the result;
-        // the actual report has already been delivered via the MCP tool path.
       }
       // Bug 2 surface: forked Claude sometimes exits cleanly without ever
       // invoking mcp__swarmeq__report (frozen tool catalog suspected). If
       // AGENT_FILE wasn't touched during this probe, the run was a silent
-      // no-op — log it so the failure is findable.
+      // no-op — log it, plus the model's actual prose response, so we can
+      // distinguish "didn't see the tool" from "saw the tool but refused".
       if (!reportWrittenSince(agent, startedAt)) {
+        const modelResult = typeof envelope?.result === "string"
+          ? envelope.result.slice(0, 1000)
+          : "";
         logProbe(agent, "probe-no-report", {
           reason: "claude exited 0 but no report was written",
+          modelResult,
           stdoutTail: stdout.slice(-500),
         });
       }

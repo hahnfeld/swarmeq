@@ -76,6 +76,14 @@ async function portReleased(p) {
     });
   });
 }
+function rootsMatch(a, b) {
+  if (a === b) return true;
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b);
+  } catch {
+    return false;
+  }
+}
 async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;
@@ -86,10 +94,9 @@ async function ensureDashboard() {
     port = parseInt(fs.readFileSync(PORT, "utf8"), 10);
   } catch {
   }
-  let hadPort = port > 0;
   if (port) {
     const id = await probeDaemon(port);
-    if (id && id.root === root) return;
+    if (id && rootsMatch(id.root, root)) return;
     if (id) {
       if (id.pid > 0) {
         try {
@@ -111,9 +118,8 @@ async function ensureDashboard() {
       }
     }
   }
-  const sub = hadPort ? "_daemon" : "dashboard";
   try {
-    const child = spawn("node", [script, sub], {
+    const child = spawn("node", [script, "_daemon"], {
       detached: true,
       stdio: "ignore",
       env: process.env

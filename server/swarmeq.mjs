@@ -16944,9 +16944,10 @@ async function startProbe(agent) {
   ];
   const BUF_CAP = 128 * 1024;
   const startedAt = Date.now();
+  const probeCwd = entry.cwd && fs8.existsSync(entry.cwd) ? entry.cwd : void 0;
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
-    const child = spawn("claude", args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     let stdoutTrunc = false, stderrTrunc = false;
     child.stdout?.on("data", (c) => {
@@ -16998,17 +16999,22 @@ async function startProbe(agent) {
         logProbe(agent, "probe-failed", { reason });
         return reject(new Error(reason));
       }
+      let envelope = null;
       try {
-        const r = JSON.parse(stdout);
-        const got = r?.model || r?.system?.model || r?.init?.model;
+        envelope = JSON.parse(stdout);
+      } catch {
+      }
+      if (envelope) {
+        const got = envelope.model || envelope.system?.model || envelope.init?.model;
         if (got && got !== model && !got.includes(model) && !model.includes(got)) {
           logProbe(agent, "model-mismatch", { expected: model, got });
         }
-      } catch {
       }
       if (!reportWrittenSince(agent, startedAt)) {
+        const modelResult = typeof envelope?.result === "string" ? envelope.result.slice(0, 1e3) : "";
         logProbe(agent, "probe-no-report", {
           reason: "claude exited 0 but no report was written",
+          modelResult,
           stdoutTail: stdout.slice(-500)
         });
       }

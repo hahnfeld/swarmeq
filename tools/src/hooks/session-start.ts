@@ -84,13 +84,23 @@ async function portReleased(p: number): Promise<boolean> {
   });
 }
 
-// Cold-start path: if no daemon is running, spawn `swarmeq dashboard` so the
-// browser pops up on the user's first interaction.
-// Upgrade path: if a daemon is running but it was started from a previous
-// plugin install (different pluginRoot), kill it and respawn just the
-// daemon — the user's existing dashboard tab will reconnect via SSE, no need
-// to open a second tab. Reopening on every session restart spams tabs on
-// Linux/Windows where `xdg-open`/`start ""` aren't idempotent.
+// Symlinks, trailing-slash drift, or /var-vs-/private/var on macOS make raw
+// string compare of pluginRoot too noisy: a single team can have a parent
+// session and N subagents each computing CLAUDE_PLUGIN_ROOT slightly
+// differently and tripping the "stale daemon, kill it" path, which kills the
+// live daemon and forces every open dashboard tab into "reconnecting" state.
+function rootsMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; }
+}
+
+// Cold-start: spawn the daemon if nothing is running. Never the `dashboard`
+// subcommand — that would call openBrowser, and team subagents fan out N
+// concurrent SessionStart hooks, each racing past the port-file check before
+// the first daemon binds. Result: N browser tabs. The browser is opened
+// only by the explicit `/swarmeq-dashboard` slash command from now on.
+// Upgrade path: if a daemon from a different plugin install is running, kill
+// it and respawn ours; existing dashboard tabs reconnect via SSE.
 async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;
@@ -98,10 +108,9 @@ async function ensureDashboard() {
   if (!fs.existsSync(script)) return;
   let port = 0;
   try { port = parseInt(fs.readFileSync(PORT, "utf8"), 10); } catch {}
-  let hadPort = port > 0;
   if (port) {
     const id = await probeDaemon(port);
-    if (id && id.root === root) return; // healthy daemon owned by this install
+    if (id && rootsMatch(id.root, root)) return; // healthy daemon owned by this install
     if (id) {
       // Stale daemon from an earlier install (or pre-identity build that
       // didn't expose root). Evict; the bind attempt below will succeed.
@@ -114,12 +123,8 @@ async function ensureDashboard() {
       try { fs.unlinkSync(PID); } catch {}
     }
   }
-  // If the user already had a dashboard tab open before this hook fired,
-  // spawn just the daemon (no browser). Cold start spawns the dashboard
-  // subcommand so the browser opens on first use.
-  const sub = hadPort ? "_daemon" : "dashboard";
   try {
-    const child = spawn("node", [script, sub], {
+    const child = spawn("node", [script, "_daemon"], {
       detached: true,
       stdio: "ignore",
       env: process.env,
