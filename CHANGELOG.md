@@ -1,5 +1,17 @@
 # swarmeq changelog
 
+## 0.3.6 — version-based daemon identity (kill-loop fix)
+
+### Fixed
+- Dashboard no longer flips between "connected" and "reconnecting" while team subagents are spinning up. Claude Code unpacks each session's plugins into a private `/tmp/claude-plugin-session-<hash>/` directory, so a parent and its N team subagents all compute different `CLAUDE_PLUGIN_ROOT` values pointing at the same plugin install. The 0.3.3–0.3.5 identity check compared `root` strings (with `fs.realpathSync` added in 0.3.5), which made every subagent's `SessionStart` hook — and every MCP-child `record()` call — treat the running daemon as a "stale earlier install" and SIGTERM it. The dashboard SSE dropped on every cycle, ending in "reconnecting" forever once a kill happened to land between session events. Identity is now keyed on `version` (from `/healthz` vs. our `plugin.json`), so any number of per-session unpacks of the same plugin install coexist with a single daemon. Legitimate upgrade case (version drift) still evicts the old daemon as before.
+
+### Changed
+- `tools/src/bind.ts:isStaleIdentity` no longer references `pluginRoot()`. Stale iff `version` differs (or is missing on pre-0.3.3 daemons).
+- `tools/src/hooks/session-start.ts` reads `<root>/.claude-plugin/plugin.json` inline (hooks stay zero-import) and compares versions instead of paths.
+
+### Added
+- Tests for `isStaleIdentity` covering the regression case (same version, different roots → not stale), version drift → stale, and missing version → stale. 96 tests pass on Node 22+.
+
 ## 0.3.5 — team-subagent visibility fixes
 
 ### Fixed

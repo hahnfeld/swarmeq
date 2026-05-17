@@ -76,13 +76,19 @@ async function portReleased(p) {
     });
   });
 }
-function rootsMatch(a, b) {
-  if (a === b) return true;
+function readLocalVersion(root) {
   try {
-    return fs.realpathSync(a) === fs.realpathSync(b);
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, ".claude-plugin", "plugin.json"), "utf8"));
+    return String(pkg.version || "");
   } catch {
-    return false;
+    return "";
   }
+}
+function sameInstall(id, root) {
+  const localVersion = readLocalVersion(root);
+  if (!localVersion) return true;
+  if (!id.version) return false;
+  return id.version === localVersion;
 }
 async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
@@ -96,7 +102,7 @@ async function ensureDashboard() {
   }
   if (port) {
     const id = await probeDaemon(port);
-    if (id && rootsMatch(id.root, root)) return;
+    if (id && sameInstall(id, root)) return;
     if (id) {
       if (id.pid > 0) {
         try {

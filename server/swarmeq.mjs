@@ -291,16 +291,15 @@ async function probeSwarmeq(port, timeoutMs = 800) {
   });
 }
 function isStaleIdentity(id) {
-  let localRoot;
+  let localVersion;
   try {
-    localRoot = pluginRoot();
+    localVersion = pluginVersion();
   } catch {
     return false;
   }
-  if (!id.root) return true;
-  if (id.root !== localRoot) return true;
-  if (id.version && id.version !== pluginVersion()) return true;
-  return false;
+  if (!localVersion) return false;
+  if (!id.version) return true;
+  return id.version !== localVersion;
 }
 async function evictStaleDaemon(port, id) {
   if (id.pid > 0) {

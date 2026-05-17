@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import type { Server } from "node:http";
-import { PORT_FILE, PID_FILE, pluginRoot, pluginVersion } from "./paths.ts";
+import { PORT_FILE, PID_FILE, pluginVersion } from "./paths.ts";
 
 const PORT_RANGE = { start: 7777, end: 7790 };
 
@@ -191,22 +191,29 @@ export async function probeSwarmeq(port: number, timeoutMs = 800): Promise<Daemo
   });
 }
 
-// A daemon is stale when its pluginRoot differs from ours, or when /healthz
-// doesn't expose a root at all (pre-0.3.3 daemons). Version drift is also
-// stale even within the same root — `npm i -g`-style reinstalls reuse paths
-// but bump the version, and the daemon's bundled code is frozen at start.
+// A daemon is stale when its version differs from ours, or when /healthz
+// doesn't expose a version at all (pre-0.3.3 daemons). Root-based identity
+// was retired in 0.3.6: Claude Code unpacks each session's plugin to a
+// private `/tmp/claude-plugin-session-<hash>/` directory, so a team with N
+// subagents has N distinct `CLAUDE_PLUGIN_ROOT` paths all pointing at the
+// same plugin install. Comparing roots made every subagent treat the
+// running daemon as foreign and SIGTERM it, producing a daemon-thrash loop
+// that froze the dashboard. Version is enough: an upgrade bumps it, a
+// downgrade bumps it; per-session unpack does not.
 //
-// Defensive: if we can't resolve our own pluginRoot (e.g., this module is
-// loaded outside the plugin), do nothing — better to keep serving than to
-// kill a working daemon based on bad input.
+// Defensive: if we can't resolve our own version, treat the daemon as not
+// stale — better to keep serving than to kill a working daemon based on
+// bad input.
 function isStaleIdentity(id: DaemonIdentity): boolean {
-  let localRoot: string;
-  try { localRoot = pluginRoot(); } catch { return false; }
-  if (!id.root) return true;
-  if (id.root !== localRoot) return true;
-  if (id.version && id.version !== pluginVersion()) return true;
-  return false;
+  let localVersion: string;
+  try { localVersion = pluginVersion(); } catch { return false; }
+  if (!localVersion) return false;
+  if (!id.version) return true;
+  return id.version !== localVersion;
 }
+
+// Exported for tests.
+export const _internals = { isStaleIdentity };
 
 async function evictStaleDaemon(port: number, id: DaemonIdentity): Promise<void> {
   if (id.pid > 0) {

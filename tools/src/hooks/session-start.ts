@@ -84,14 +84,27 @@ async function portReleased(p: number): Promise<boolean> {
   });
 }
 
-// Symlinks, trailing-slash drift, or /var-vs-/private/var on macOS make raw
-// string compare of pluginRoot too noisy: a single team can have a parent
-// session and N subagents each computing CLAUDE_PLUGIN_ROOT slightly
-// differently and tripping the "stale daemon, kill it" path, which kills the
-// live daemon and forces every open dashboard tab into "reconnecting" state.
-function rootsMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; }
+// Root-based daemon identity was retired in 0.3.6 — Claude Code unpacks each
+// session's plugin into its own /tmp/claude-plugin-session-<hash>/ directory,
+// so a parent and its N team subagents all compute different CLAUDE_PLUGIN_ROOT
+// values pointing at the same plugin install. Comparing roots made every
+// subagent treat the running daemon as foreign, SIGTERM it, and respawn —
+// the dashboard's SSE connection drops on every cycle, ending in "reconnecting"
+// forever. Version match is the durable signal: a real upgrade bumps it,
+// per-session unpack does not. Hooks stay zero-import, so read plugin.json
+// inline rather than calling the helper exported from paths.ts.
+function readLocalVersion(root: string): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, ".claude-plugin", "plugin.json"), "utf8"));
+    return String(pkg.version || "");
+  } catch { return ""; }
+}
+
+function sameInstall(id: DaemonIdentity, root: string): boolean {
+  const localVersion = readLocalVersion(root);
+  if (!localVersion) return true;  // can't read our version, fail safe — don't kill a working daemon
+  if (!id.version) return false;    // pre-0.3.3 daemon, no identity — let the upgrade path evict it
+  return id.version === localVersion;
 }
 
 // Cold-start: spawn the daemon if nothing is running. Never the `dashboard`
@@ -99,8 +112,8 @@ function rootsMatch(a: string, b: string): boolean {
 // concurrent SessionStart hooks, each racing past the port-file check before
 // the first daemon binds. Result: N browser tabs. The browser is opened
 // only by the explicit `/swarmeq-dashboard` slash command from now on.
-// Upgrade path: if a daemon from a different plugin install is running, kill
-// it and respawn ours; existing dashboard tabs reconnect via SSE.
+// Upgrade path: if a daemon at a different version is running, kill it and
+// respawn ours; existing dashboard tabs reconnect via SSE.
 async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;
@@ -110,7 +123,7 @@ async function ensureDashboard() {
   try { port = parseInt(fs.readFileSync(PORT, "utf8"), 10); } catch {}
   if (port) {
     const id = await probeDaemon(port);
-    if (id && rootsMatch(id.root, root)) return; // healthy daemon owned by this install
+    if (id && sameInstall(id, root)) return; // healthy daemon at our version
     if (id) {
       // Stale daemon from an earlier install (or pre-identity build that
       // didn't expose root). Evict; the bind attempt below will succeed.
