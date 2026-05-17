@@ -1,6 +1,6 @@
 {
   "name": "swarmeq",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Self-reported emotional state dashboard for Claude Code Agent Teams.",
   "license": "MIT",
   "author": {
@@ -9,7 +9,6 @@
   "homepage": "https://github.com/hahnfeld/swarmeq",
   "keywords": ["agent-teams", "dashboard", "introspection", "mcp", "observability"],
   "commands": "./commands",
-  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "swarmeq": {
       "command": "node",

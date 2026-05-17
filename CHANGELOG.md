@@ -1,5 +1,10 @@
 # swarmeq changelog
 
+## 0.3.2 — drop explicit hooks pointer from plugin.json
+
+### Fixed
+- `.claude-plugin/plugin.json` no longer declares `"hooks": "./hooks/hooks.json"`. The Claude Code plugin loader auto-loads `hooks/hooks.json` from its standard path, so declaring it again in the manifest tripped the loader's duplicate-detection guard with `Duplicate hooks file detected: ./hooks/hooks.json resolves to already-loaded file …`. 0.3.1 fixed the *shape* of `hooks/hooks.json` but left the redundant manifest pointer in place, so `--plugin-url` installs still failed at load time. The `manifest.hooks` field is now reserved for *additional* hook files beyond the standard location, per the loader's error message.
+
 ## 0.3.1 — plugin hooks.json shape fix
 
 ### Fixed

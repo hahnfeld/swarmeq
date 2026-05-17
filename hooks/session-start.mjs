@@ -3,7 +3,7 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// src/hooks/session-start.ts
+// tools/src/hooks/session-start.ts
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
