@@ -17178,7 +17178,7 @@ var init_doctor = __esm({
 // tools/src/swarmeq.ts
 init_bind();
 import fs11 from "node:fs";
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn2, spawnSync } from "node:child_process";
 import os2 from "node:os";
 
 // tools/src/http.ts
@@ -17492,9 +17492,17 @@ function openBrowser(url) {
     args = [url];
   }
   try {
-    const child = spawn2(cmd, args, { detached: true, stdio: "ignore" });
-    child.unref();
-  } catch {
+    const r = spawnSync(cmd, args, { stdio: "ignore" });
+    if (r.error) {
+      process.stderr.write(`swarmeq dashboard: openBrowser failed (${cmd}): ${r.error.message}
+`);
+    } else if (r.status !== null && r.status !== 0) {
+      process.stderr.write(`swarmeq dashboard: openBrowser exited ${r.status} (${cmd})
+`);
+    }
+  } catch (err) {
+    process.stderr.write(`swarmeq dashboard: openBrowser threw: ${err.message}
+`);
   }
 }
 async function main() {

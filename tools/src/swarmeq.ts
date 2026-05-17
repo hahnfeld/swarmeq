@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.ts";
 import { attachRoutes } from "./http.ts";
@@ -99,11 +99,22 @@ function openBrowser(url: string): void {
   if (plat === "darwin") { cmd = "open"; args = [url]; }
   else if (plat === "win32") { cmd = "cmd"; args = ["/c", "start", "", url]; }
   else { cmd = "xdg-open"; args = [url]; }
+  // spawnSync, not detached spawn: the slash-command wrapper kills the
+  // process tree as soon as the `!node ... dashboard` body returns, and
+  // an asynchronously-spawned `open` child gets killed before LaunchServices
+  // (or xdg-open/start) actually dispatches the URL. spawnSync keeps us
+  // alive for the few ms `open` takes to hand off; by then the browser is
+  // owned by a system daemon, not us, so it survives our subsequent exit.
   try {
-    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-    child.unref();
-  } catch {
+    const r = spawnSync(cmd, args, { stdio: "ignore" });
+    if (r.error) {
+      process.stderr.write(`swarmeq dashboard: openBrowser failed (${cmd}): ${r.error.message}\n`);
+    } else if (r.status !== null && r.status !== 0) {
+      process.stderr.write(`swarmeq dashboard: openBrowser exited ${r.status} (${cmd})\n`);
+    }
+  } catch (err) {
     // Browser-open is best-effort; never throw.
+    process.stderr.write(`swarmeq dashboard: openBrowser threw: ${(err as Error).message}\n`);
   }
 }
 

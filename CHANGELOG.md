@@ -1,5 +1,10 @@
 # swarmeq changelog
 
+## 0.3.7 — `/swarmeq-dashboard` actually opens the browser again
+
+### Fixed
+- `/swarmeq-dashboard` (and `node server/swarmeq.mjs dashboard` via the slash command) no longer silently fails to open a browser tab. `openBrowser` used `spawn(cmd, args, { detached: true, stdio: "ignore" }).unref()`, which works fine when invoked from a Bash tool call but breaks when invoked from the slash-command body (`!node …`): Claude Code wraps the slash-command body in a process tree that gets torn down as soon as our `node` exits, and the detached `open` child gets killed before LaunchServices (or `xdg-open`/`start`) has handed the URL off to the system URL handler. Switched to `spawnSync`, which keeps the parent alive for the few ms `open` itself takes to dispatch; by then the browser tab is owned by a system daemon and survives our exit. Failures are now also surfaced on stderr instead of being silently swallowed by the bare `try {} catch {}`.
+
 ## 0.3.6 — version-based daemon identity (kill-loop fix)
 
 ### Fixed
