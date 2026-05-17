@@ -1,6 +1,6 @@
-import { allowedLabels } from "./validate.mjs";
+import { allowedLabels } from "./validate.ts";
 
-export function introspectionPrompt(agentName) {
+export function introspectionPrompt(agentName: string): string {
   const labels = Array.from(allowedLabels()).join(", ");
   return `You are reporting your CURRENT functional state to a debugging dashboard.
 This is observability tooling, not roleplay or performance.

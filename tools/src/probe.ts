@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { REGISTRY_FILE, pluginRoot } from "./paths.mjs";
-import { broadcast } from "./sse.mjs";
-import { introspectionPrompt } from "./prompt.mjs";
+import { REGISTRY_FILE, pluginRoot } from "./paths.ts";
+import type { Registry, RegistryEntry } from "./paths.ts";
+import { broadcast } from "./sse.ts";
+import { introspectionPrompt } from "./prompt.ts";
 
 const PROBE_TIMEOUT_MS = 30_000;
 
-export async function startProbe(agent) {
+export async function startProbe(agent: string): Promise<void> {
   const entry = lookupAgent(agent);
   if (!entry || !entry.session_id) {
     const reason = `no registered session for agent "${agent}"`;
@@ -44,22 +45,22 @@ export async function startProbe(agent) {
   ];
 
   const BUF_CAP = 128 * 1024; // 128KB per stream — plenty for a single probe result, prevents OOM
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
     const child = spawn("claude", args, { env, stdio: ["ignore", "pipe", "pipe"] });
 
     let stdout = "", stderr = "";
     let stdoutTrunc = false, stderrTrunc = false;
-    child.stdout.on("data", (c) => {
+    child.stdout?.on("data", (c: Buffer) => {
       if (stdout.length < BUF_CAP) { stdout += c.toString(); }
       else if (!stdoutTrunc) { stdoutTrunc = true; }
     });
-    child.stderr.on("data", (c) => {
+    child.stderr?.on("data", (c: Buffer) => {
       if (stderr.length < BUF_CAP) { stderr += c.toString(); }
       else if (!stderrTrunc) { stderrTrunc = true; }
     });
 
-    let killHard = null;
+    let killHard: NodeJS.Timeout | null = null;
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       // Escalate to SIGKILL if the child ignores SIGTERM.
@@ -69,13 +70,13 @@ export async function startProbe(agent) {
 
     const cleanup = () => { clearTimeout(timer); if (killHard) clearTimeout(killHard); };
 
-    child.once("error", (err) => {
+    child.once("error", (err: Error) => {
       cleanup();
       broadcast("probe-failed", { agent, reason: `spawn failed: ${err.message}` });
       reject(err);
     });
 
-    child.once("close", (code) => {
+    child.once("close", (code: number | null) => {
       cleanup();
       if (code !== 0) {
         const tail = stderr.slice(-500) || stdout.slice(-500);
@@ -108,9 +109,9 @@ export async function startProbe(agent) {
   });
 }
 
-function lookupAgent(agent) {
+function lookupAgent(agent: string): RegistryEntry | null {
   try {
-    const reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8"));
+    const reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")) as Registry;
     return reg[agent] || null;
   } catch {
     return null;

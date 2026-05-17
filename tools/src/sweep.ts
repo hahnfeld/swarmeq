@@ -1,21 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
-import { AGENT_FILE, stateDir } from "./paths.mjs";
-import { broadcast } from "./sse.mjs";
-import { readAllReports } from "./record.mjs";
-import { snapshotAndBroadcast } from "./sentiment.mjs";
+import { AGENT_FILE, stateDir } from "./paths.ts";
+import { broadcast } from "./sse.ts";
+import { readAllReports } from "./record.ts";
+import { snapshotAndBroadcast } from "./sentiment.ts";
 
 const STALE_MS = 10 * 60 * 1000; // 10 minutes
 const SWEEP_INTERVAL_MS = 30_000;
 
-let sweepTimer = null;
+let sweepTimer: NodeJS.Timeout | null = null;
 // Agents the server has previously broadcast as live. We diff against this
 // each sweep so that a missing file (e.g., the session-end hook unlinked it)
 // also fires an `agent-removed` event, not just files we delete ourselves.
-const lastSeen = new Set();
+const lastSeen = new Set<string>();
 let primed = false;
 
-function readReportTs(file) {
+function readReportTs(file: string): number {
   try {
     const r = JSON.parse(fs.readFileSync(file, "utf8"));
     const ts = Number(r?.ts);
@@ -28,14 +28,14 @@ function readReportTs(file) {
 // between sweeps (the session-end hook unlinks the per-agent file when a
 // session deregisters, so we only need to *notice* it's gone). Returns the
 // list of agent names removed this pass.
-export function sweepStaleAgents() {
+export function sweepStaleAgents(): string[] {
   const dir = stateDir();
-  let entries = [];
+  let entries: string[] = [];
   try { entries = fs.readdirSync(dir); } catch { return []; }
 
   const now = Date.now();
-  const live = new Set();
-  const removed = [];
+  const live = new Set<string>();
+  const removed: string[] = [];
 
   for (const f of entries) {
     if (!f.endsWith(".json") || f === "registry.json") continue;
@@ -76,7 +76,7 @@ export function sweepStaleAgents() {
   return removed;
 }
 
-export function startSweepTimer() {
+export function startSweepTimer(): void {
   if (sweepTimer) return;
   // Run once promptly so a freshly-bound dashboard reconciles old files,
   // then on a fixed cadence. 10-minute staleness doesn't need sub-second
@@ -86,6 +86,6 @@ export function startSweepTimer() {
   sweepTimer.unref?.();
 }
 
-export function stopSweepTimer() {
+export function stopSweepTimer(): void {
   if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
 }

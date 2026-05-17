@@ -1,18 +1,23 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { AGENT_FILE, PORT_FILE, REGISTRY_FILE, stateDir, writeAtomic } from "./paths.mjs";
-import { bindState } from "./bind.mjs";
-import { broadcast } from "./sse.mjs";
-import { validateReport } from "./validate.mjs";
-import { snapshotAndBroadcast } from "./sentiment.mjs";
+import { AGENT_FILE, REGISTRY_FILE, stateDir, writeAtomic } from "./paths.ts";
+import { bindState, readActivePort } from "./bind.ts";
+import { broadcast } from "./sse.ts";
+import { validateReport } from "./validate.ts";
+import type { Report } from "./validate.ts";
+import { snapshotAndBroadcast } from "./sentiment.ts";
+
+export type ReportsByAgent = Record<string, Report>;
+
+interface CodedError extends Error { code?: string }
 
 // Single chokepoint: persist + broadcast (or forward to dashboard host).
 // Throws Error with code=EVALIDATE on schema failure.
-export async function record(raw) {
+export async function record(raw: unknown): Promise<Report> {
   const v = validateReport(raw);
   if (!v.ok) {
-    const e = new Error(`invalid report: ${v.errs.join("; ")}`);
+    const e: CodedError = new Error(`invalid report: ${v.errs.join("; ")}`);
     e.code = "EVALIDATE";
     throw e;
   }
@@ -20,7 +25,7 @@ export async function record(raw) {
   try {
     writeAtomic(AGENT_FILE(report.agent), JSON.stringify(report, null, 2));
   } catch (err) {
-    process.stderr.write(`swarmeq record: cannot write state for ${report.agent}: ${err.message}\n`);
+    process.stderr.write(`swarmeq record: cannot write state for ${report.agent}: ${(err as Error).message}\n`);
   }
 
   const state = bindState();
@@ -32,8 +37,9 @@ export async function record(raw) {
     snapshotAndBroadcast(readLivingReports());
   } else {
     // Re-read .port each time so a long-lived MCP child finds the dashboard
-    // whenever it appears (or moves), without needing to be restarted.
-    const port = state.port || readPortFile();
+    // whenever it appears (or moves). readActivePort() validates via /healthz
+    // so we never forward to a foreign service that happened to grab the port.
+    const port = state.port || (await readActivePort());
     if (port) forwardToDashboard(port, report).catch(() => {});
   }
   return report;
@@ -43,11 +49,11 @@ export async function record(raw) {
 // maintained by SessionStart/SessionEnd hooks) may contribute to team
 // aggregates. Drops report files left behind when SessionEnd didn't run
 // before the sweep reaped them.
-export function readLivingReports() {
-  let reg = {};
+export function readLivingReports(): ReportsByAgent {
+  let reg: Record<string, unknown> = {};
   try { reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
   const all = readAllReports();
-  const out = {};
+  const out: ReportsByAgent = {};
   for (const name of Object.keys(all)) {
     if (Object.prototype.hasOwnProperty.call(reg, name)) out[name] = all[name];
   }
@@ -55,17 +61,8 @@ export function readLivingReports() {
 }
 
 
-function readPortFile() {
-  try {
-    const p = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10);
-    return Number.isFinite(p) ? p : null;
-  } catch {
-    return null;
-  }
-}
-
-function forwardToDashboard(port, report) {
-  return new Promise((resolve, reject) => {
+function forwardToDashboard(port: number, report: Report): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const body = JSON.stringify(report);
     const req = http.request({
       host: "127.0.0.1", port, path: "/ingest", method: "POST",
@@ -81,14 +78,14 @@ function forwardToDashboard(port, report) {
   });
 }
 
-export function readAllReports() {
-  const out = {};
+export function readAllReports(): ReportsByAgent {
+  const out: ReportsByAgent = {};
   const dir = stateDir();
   try {
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".json") || f === "registry.json") continue;
       try {
-        const r = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+        const r = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as Report;
         if (r && r.agent) out[r.agent] = r;
       } catch {}
     }

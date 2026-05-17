@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
-import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.mjs";
-import { attachRoutes } from "./http.mjs";
-import { PORT_FILE, PID_FILE } from "./paths.mjs";
+import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.ts";
+import { attachRoutes } from "./http.ts";
+import { PORT_FILE, PID_FILE } from "./paths.ts";
 
 const SUB = process.argv[2] || "";
 
-async function ensureBind() {
-  await bindDashboardPort();
+async function ensureBind(knownActive?: number | null) {
+  await bindDashboardPort(knownActive);
   attachRoutes();
   return bindState();
 }
@@ -18,7 +18,7 @@ async function cmdMcp() {
   // Claude Code session would silently spin up its own private dashboard
   // and SSE-broadcast reports into a void the real dashboard isn't reading.
   await discoverDashboard();
-  const { startMcp } = await import("./mcp.mjs");
+  const { startMcp } = await import("./mcp.ts");
   await startMcp();
   // startMcp() awaits connect() and returns; the stdio transport keeps the
   // process alive via the open stdin/stdout streams. Don't exit.
@@ -51,7 +51,7 @@ async function cmdDaemon() {
   // `cmdDashboard` and from the session-start hook.
   //
   // If a previous daemon died via SIGKILL or panic, the SIGTERM/exit
-  // cleanup in bind.mjs never ran and .port/.pid linger. The /healthz
+  // cleanup in bind.ts never ran and .port/.pid linger. The /healthz
   // identity check in readActivePort() correctly rejects them, but the
   // files themselves are still on disk; clear them up-front so the
   // bind loop and any concurrent reader see a clean slate.
@@ -60,7 +60,7 @@ async function cmdDaemon() {
     try { fs.unlinkSync(PORT_FILE()); } catch {}
     try { fs.unlinkSync(PID_FILE()); } catch {}
   }
-  const s = await ensureBind();
+  const s = await ensureBind(active);
   if (!s.bound) {
     // Lost the race — another daemon already owns the port. Just exit.
     return;
@@ -69,7 +69,7 @@ async function cmdDaemon() {
   await new Promise(() => {});
 }
 
-function spawnDaemon() {
+function spawnDaemon(): void {
   try {
     const child = spawn(process.execPath, [process.argv[1], "_daemon"], {
       detached: true,
@@ -78,11 +78,11 @@ function spawnDaemon() {
     });
     child.unref();
   } catch (err) {
-    process.stderr.write(`swarmeq dashboard: failed to spawn daemon: ${err.message}\n`);
+    process.stderr.write(`swarmeq dashboard: failed to spawn daemon: ${(err as Error).message}\n`);
   }
 }
 
-async function waitForPort(timeoutMs) {
+async function waitForPort(timeoutMs: number): Promise<number | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const p = await readActivePort();
@@ -92,9 +92,10 @@ async function waitForPort(timeoutMs) {
   return null;
 }
 
-function openBrowser(url) {
+function openBrowser(url: string): void {
   const plat = os.platform();
-  let cmd = null, args = [];
+  let cmd: string;
+  let args: string[];
   if (plat === "darwin") { cmd = "open"; args = [url]; }
   else if (plat === "win32") { cmd = "cmd"; args = ["/c", "start", "", url]; }
   else { cmd = "xdg-open"; args = [url]; }
@@ -118,12 +119,12 @@ async function main() {
       const agent = process.argv[3];
       if (!agent) { process.stderr.write("usage: swarmeq probe <agent>\n"); process.exit(2); }
       await discoverDashboard();
-      const { startProbe } = await import("./probe.mjs");
+      const { startProbe } = await import("./probe.ts");
       try { await startProbe(agent); } catch { /* error already broadcast */ }
       return;
     }
-    case "stop":      return (await import("./ops.mjs")).stopServer();
-    case "doctor":    return (await import("./doctor.mjs")).runDoctor();
+    case "stop":      return (await import("./ops.ts")).stopServer();
+    case "doctor":    return (await import("./doctor.ts")).runDoctor();
     default:
       process.stderr.write("usage: swarmeq <mcp|dashboard|stop|doctor>\n");
       process.exit(2);

@@ -1,26 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
-import { dashboardFile, feelingsFile, pluginRoot, REGISTRY_FILE, stateDir } from "./paths.mjs";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { dashboardFile, feelingsFile, pluginRoot, REGISTRY_FILE } from "./paths.ts";
 
-// Mime types for the few static asset extensions we serve from dashboard/.
-const MIME = {
+const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml", ".webp": "image/webp", ".gif": "image/gif",
   ".ico": "image/x-icon",
 };
-import { bindState } from "./bind.mjs";
-import { addClient } from "./sse.mjs";
-import { record, readLivingReports } from "./record.mjs";
-import { startSweepTimer } from "./sweep.mjs";
-import { computeSentiment, readSentimentHistory } from "./sentiment.mjs";
+import { bindState } from "./bind.ts";
+import { addClient } from "./sse.ts";
+import { record, readLivingReports } from "./record.ts";
+import { startSweepTimer } from "./sweep.ts";
+import { computeSentiment, readSentimentHistory } from "./sentiment.ts";
 
-// Wire HTTP routes onto the bound server (if any). Idempotent on the same
-// server instance.
-export function attachRoutes() {
+// Track which Server instances already have our handler attached, without
+// stamping a property onto Node's Server object.
+const attached = new WeakSet<Server>();
+
+export function attachRoutes(): void {
   const state = bindState();
   if (!state.bound || !state.server) return;
-  if (state.server._swarmeqAttached) return;
-  state.server._swarmeqAttached = true;
+  if (attached.has(state.server)) return;
+  attached.add(state.server);
   state.server.on("request", handle);
   // The bound process is the canonical dashboard host — only it should
   // run the stale-agent sweep so we don't have N MCP children racing on
@@ -28,9 +30,9 @@ export function attachRoutes() {
   startSweepTimer();
 }
 
-async function handle(req, res) {
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
-    const u = new URL(req.url, "http://127.0.0.1");
+    const u = new URL(req.url ?? "/", "http://127.0.0.1");
     const pn = u.pathname;
     if (req.method === "GET" && (pn === "/" || pn === "/index.html" || pn === "/team")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
     if (req.method === "GET" && pn === "/feelings.json")               return serveFile(res, feelingsFile(), "application/json");
@@ -55,11 +57,11 @@ async function handle(req, res) {
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "text/plain" });
     }
-    res.end(`server error: ${err.message}\n`);
+    res.end(`server error: ${(err as Error).message}\n`);
   }
 }
 
-function serveFile(res, file, contentType) {
+function serveFile(res: ServerResponse, file: string, contentType: string): void {
   fs.readFile(file, (err, buf) => {
     if (err) {
       res.writeHead(500, { "Content-Type": "text/plain" });
@@ -71,14 +73,14 @@ function serveFile(res, file, contentType) {
   });
 }
 
-function serveJSON(res, data) {
+function serveJSON(res: ServerResponse, data: unknown): void {
   const body = Buffer.from(JSON.stringify(data));
   res.writeHead(200, { "Content-Type": "application/json", "Content-Length": body.length });
   res.end(body);
 }
 
 function snapshot() {
-  let registry = {};
+  let registry: Record<string, unknown> = {};
   try { registry = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
   // Living agents only: stale report files for vanished sessions never
   // contribute to the team view or per-agent tabs.
@@ -86,11 +88,11 @@ function snapshot() {
   return { agents, registry, sentiment: computeSentiment(agents), ts: Date.now() };
 }
 
-function ingest(req, res) {
+function ingest(req: IncomingMessage, res: ServerResponse): void {
   let body = "";
   let tooBig = false;
   req.setEncoding("utf8");
-  req.on("data", (c) => {
+  req.on("data", (c: string) => {
     if (tooBig) return;
     body += c;
     if (body.length > 65536) {
@@ -107,12 +109,12 @@ function ingest(req, res) {
       res.writeHead(204);
       res.end();
     } catch (err) {
-      const status = err.code === "EVALIDATE" ? 400 : 500;
+      const e = err as Error & { code?: string };
+      const status = e.code === "EVALIDATE" ? 400 : 500;
       if (!res.headersSent) {
         res.writeHead(status, { "Content-Type": "text/plain" });
       }
-      res.end(err.message + "\n");
+      res.end(e.message + "\n");
     }
   });
 }
-

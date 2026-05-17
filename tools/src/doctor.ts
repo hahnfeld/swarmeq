@@ -1,24 +1,22 @@
-import net from "node:net";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
-import { stateDir } from "./paths.mjs";
+import { stateDir } from "./paths.ts";
+import { tryBind } from "./bind.ts";
 
-function row(name, ok, hint = "") {
+function row(name: string, ok: boolean, hint = ""): string {
   const sym = ok ? "✓" : "✗";
   return `${sym} ${name.padEnd(34)} ${ok ? "" : hint}`;
 }
 
-async function portFree(port) {
-  return new Promise((res) => {
-    const srv = net.createServer();
-    srv.once("error", () => res(false));
-    srv.once("listening", () => { srv.close(); res(true); });
-    srv.listen(port, "127.0.0.1");
-  });
+async function portFree(port: number): Promise<boolean> {
+  const srv = await tryBind(port);
+  if (!srv) return false;
+  srv.close();
+  return true;
 }
 
-export async function runDoctor() {
-  const lines = [];
+export async function runDoctor(): Promise<void> {
+  const lines: string[] = [];
 
   const node = process.versions.node.split(".").map(Number);
   lines.push(row("node >= 20", node[0] >= 20, `current: v${process.versions.node}`));
@@ -28,7 +26,8 @@ export async function runDoctor() {
     const cmd = process.platform === "win32"
       ? "where claude"
       : "command -v claude 2>/dev/null || which claude 2>/dev/null";
-    claudePath = execSync(cmd, { encoding: "utf8", shell: true }).trim().split(/\r?\n/)[0] || "";
+    const shell = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
+    claudePath = execSync(cmd, { encoding: "utf8", shell }).trim().split(/\r?\n/)[0] || "";
   } catch {}
   lines.push(row("claude on PATH", !!claudePath, "install Claude Code, then re-run"));
 

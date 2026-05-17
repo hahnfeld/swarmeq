@@ -1,20 +1,22 @@
 # Contributing to swarmeq
 
-Welcome! swarmeq is a small Claude Code plugin written in plain Node.js — there's no framework, no transpiler, and no app server. If you can read a Node script, you can change anything in here.
+Welcome! swarmeq is a small Claude Code plugin written in TypeScript with a minimal toolchain — esbuild for bundling, `tsc` for type-checking. No framework, no transpiler step you have to learn, no app server. If you can read a Node script, you can change anything in here.
 
 ## The three layers
 
 swarmeq has three places where code lives, and you edit each differently:
 
-| Layer | Where | How you change it |
+| Layer | Source | Output (committed) |
 | --- | --- | --- |
-| **Hooks** | `hooks/*.mjs` | Edit directly. Plain standalone Node scripts that Claude Code runs on lifecycle events (SessionStart, Stop, SessionEnd, SubagentStop). |
-| **Server** | `server/swarmeq.mjs` | **Don't edit this file by hand.** It's a bundled artifact. Source lives in `tools/src/*.mjs`; edit there and rebuild. |
-| **Dashboard** | `dashboard/dashboard.html` | Edit directly. Single static HTML file with inline JS, CSS, and SVG. |
+| **Server** | `tools/src/*.ts` | `server/swarmeq.mjs` (one bundle) |
+| **Hooks** | `tools/src/hooks/*.ts` | `hooks/*.mjs` (one bundle per hook, self-contained) |
+| **Dashboard** | `dashboard/dashboard.html` | (same file — single static HTML with inline JS/CSS/SVG) |
+
+The server and the four hooks are bundled with esbuild — **never edit the `.mjs` artifacts by hand.** The dashboard is edited directly.
 
 ## The build loop
 
-The server is bundled with esbuild. One-time setup:
+One-time setup:
 
 ```bash
 cd tools && npm install
@@ -26,9 +28,15 @@ After editing anything under `tools/src/`, rebuild:
 node tools/build.mjs
 ```
 
-That produces a fresh `server/swarmeq.mjs` (~600 KB, MCP SDK inlined). Commit the rebuilt bundle along with your source changes — end users install the plugin pre-bundled.
+That produces a fresh `server/swarmeq.mjs` (~600 KB, MCP SDK inlined) and four self-contained `hooks/*.mjs` bundles. Commit the rebuilt artifacts along with your source changes — end users install the plugin pre-bundled.
 
-The hooks and the dashboard are not bundled. Edits to those files take effect immediately.
+Type-check (optional but recommended before pushing):
+
+```bash
+cd tools && npm run typecheck
+```
+
+This runs `tsc --noEmit` in strict mode. The build itself doesn't gate on type errors — esbuild ignores them — so the typecheck script is your safety net.
 
 ## Testing locally
 
@@ -46,14 +54,19 @@ Inside the session:
 
 For hook or dashboard changes, you don't need to stop the daemon — start a new Claude Code session and the new code takes effect.
 
+## Review loop
+
+After non-trivial changes, run `/simplify` before committing. It launches three parallel review agents (reuse, quality, efficiency), aggregates findings, and applies safe simplifications. TypeScript often surfaces redundant abstractions or dead branches that survived from the JS era — `/simplify` catches them.
+
 ## Conventions worth knowing
 
 A few non-obvious design rules baked into the code. Following them keeps the system simple:
 
-- **Hooks are standalone.** They don't import from `tools/src/`. If a shared module broke at import time, every hook would silently fail and Claude Code would keep running fine — the worst kind of bug. The 10-ish lines of `portReachable` duplicated between `hooks/session-start.mjs` and `hooks/stop.mjs` is intentional.
+- **Hooks are standalone.** Each hook's `.ts` source has zero imports from `tools/src/` (only `node:*` builtins). If a shared module broke at import time, every hook would silently fail and Claude Code would keep running fine — the worst kind of bug. The 10-ish lines of `portReachable` and the `RegistryEntry` interface duplicated across `tools/src/hooks/*.ts` are intentional. The bundled `hooks/*.mjs` artifacts contain only what the hook itself references — no shared swarmeq runtime.
 - **Only the daemon binds the HTTP port.** MCP children call `discoverDashboard()`, never `bindDashboardPort()`. This prevents N silent dashboards (one per Claude Code session) that nobody is watching.
 - **Only the daemon writes `sentiment.jsonl`.** MCP children forward to the daemon's `/ingest`. Otherwise concurrent appends would race.
 - **`SWARMEQ_PROBE=1` is sacred.** All hooks check it and exit early. Without that guard, every probe fork would spawn another probe fork on its own Stop hook, and Claude API spend would skyrocket.
+- **`/healthz` is the only adoption check.** Anywhere that trusts a recorded `.port`, it must verify via `isSwarmeqHealthy()` first. Never trust raw TCP reachability — a foreign service could have grabbed the port.
 
 ## Commit style
 
@@ -64,4 +77,4 @@ Don't commit `swarmeq-plan.md` — it's gitignored and used for scratch planning
 ## Where to learn more
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — runtime architecture: the four kinds of process, end-to-end data flow, what lives on disk, how resilience works.
-- The source itself. `tools/src/swarmeq.mjs` is the CLI entry point; follow the imports from there.
+- The source itself. `tools/src/swarmeq.ts` is the CLI entry point; follow the imports from there.

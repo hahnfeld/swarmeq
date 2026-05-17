@@ -1,8 +1,8 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { record } from "./record.mjs";
-import { allowedLabels } from "./validate.mjs";
+import { record } from "./record.ts";
+import { allowedLabels } from "./validate.ts";
 
 const TOOL = {
   name: "report",
@@ -47,7 +47,7 @@ export async function startMcp() {
       const stored = await record(req.params.arguments);
       return { content: [{ type: "text", text: `recorded ${stored.agent} at ${new Date(stored.ts).toISOString()}` }] };
     } catch (err) {
-      return { isError: true, content: [{ type: "text", text: err.message }] };
+      return { isError: true, content: [{ type: "text", text: (err as Error).message }] };
     }
   });
 

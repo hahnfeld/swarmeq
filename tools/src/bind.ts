@@ -1,22 +1,30 @@
 import fs from "node:fs";
 import http from "node:http";
-import { PORT_FILE, PID_FILE } from "./paths.mjs";
+import type { Server } from "node:http";
+import { PORT_FILE, PID_FILE } from "./paths.ts";
 
 const PORT_RANGE = { start: 7777, end: 7790 };
 
-const _state = {
+export interface BindState {
+  bound: boolean;
+  port: number | null;
+  server: Server | null;
+  url: string | null;
+}
+
+const _state: BindState = {
   bound: false,
   port: null,
   server: null,
   url: null,
 };
 
-export function bindState() { return { ..._state }; }
+export function bindState(): BindState { return { ..._state }; }
 
-async function tryBind(port) {
+export async function tryBind(port: number): Promise<Server | null> {
   return new Promise((resolve) => {
     const srv = http.createServer();
-    srv.once("error", (err) => {
+    srv.once("error", (err: NodeJS.ErrnoException) => {
       if (err && err.code !== "EADDRINUSE") {
         process.stderr.write(`swarmeq bind: port ${port} unbindable (${err.code}): ${err.message}\n`);
       }
@@ -36,11 +44,13 @@ async function tryBind(port) {
 // When 7777 is held by an unrelated service, the loop walks 7777→7790 until
 // it finds a free port; the daemon writes whichever port it actually bound,
 // and clients discover that port via `.port` + the /healthz identity check.
-export async function bindDashboardPort() {
+export async function bindDashboardPort(knownActive?: number | null): Promise<BindState> {
   if (_state.bound) return bindState();
   // Don't spawn a second swarmeq daemon if one is already healthy somewhere
-  // in the range — adopt it as a non-bound peer instead.
-  const existing = await readActivePort();
+  // in the range — adopt it as a non-bound peer instead. Callers that
+  // already probed /healthz can pass the result in via knownActive to skip
+  // the second roundtrip.
+  const existing = knownActive ?? (await readActivePort());
   if (existing) {
     _state.bound = false;
     _state.port = existing;
@@ -84,7 +94,7 @@ export async function bindDashboardPort() {
         try { recordedPid = parseInt(fs.readFileSync(PID_FILE(), "utf8"), 10); } catch {}
         if (!recordedPid) {
           try { fs.writeFileSync(PID_FILE(), String(process.pid)); } catch {}
-          try { fs.writeFileSync(PORT_FILE(), String(_state.port)); } catch {}
+          try { fs.writeFileSync(PORT_FILE(), String(_state.port ?? "")); } catch {}
           return;
         }
         if (recordedPid !== process.pid) {
@@ -115,7 +125,7 @@ export async function bindDashboardPort() {
 // Used by the MCP child process so it forwards reports to the real
 // dashboard instead of greedily binding 7778+ and broadcasting into a
 // private SSE channel no one is listening to.
-export async function discoverDashboard() {
+export async function discoverDashboard(): Promise<BindState> {
   if (_state.bound) return bindState();
   const active = await readActivePort();
   _state.bound = false;
@@ -127,8 +137,8 @@ export async function discoverDashboard() {
 // Probe the recorded dashboard port and verify it actually serves swarmeq —
 // not some unrelated process that grabbed the port after we recorded it.
 // Returns the port number on success, null otherwise.
-export async function readActivePort() {
-  let port = null;
+export async function readActivePort(): Promise<number | null> {
+  let port: number | null = null;
   try { port = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10); } catch {}
   if (!port) return null;
   return (await isSwarmeqHealthy(port)) ? port : null;
@@ -137,15 +147,15 @@ export async function readActivePort() {
 // GET /healthz and confirm the JSON marker. Cheap identity check so we never
 // open a browser tab at, or forward MCP ingest to, a foreign service that
 // happens to be listening on our port.
-export async function isSwarmeqHealthy(port, timeoutMs = 800) {
-  return new Promise((resolve) => {
+export async function isSwarmeqHealthy(port: number, timeoutMs = 800): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const req = http.request({
       host: "127.0.0.1", port, path: "/healthz", method: "GET", timeout: timeoutMs,
     }, (res) => {
       if (res.statusCode !== 200) { res.resume(); return resolve(false); }
       let body = "";
       res.setEncoding("utf8");
-      res.on("data", (c) => { body += c; if (body.length > 256) { req.destroy(); resolve(false); } });
+      res.on("data", (c: string) => { body += c; if (body.length > 256) { req.destroy(); resolve(false); } });
       res.on("end", () => {
         try {
           const obj = JSON.parse(body);

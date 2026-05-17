@@ -1,7 +1,16 @@
-const clients = new Set();
-let keepaliveTimer = null;
+import type { IncomingMessage, ServerResponse } from "node:http";
 
-export function addClient(req, res) {
+export type SseEvent =
+  | "report"
+  | "probe-failed"
+  | "agent-removed"
+  | "sentiment"
+  | "model-mismatch";
+
+const clients = new Set<ServerResponse>();
+let keepaliveTimer: NodeJS.Timeout | null = null;
+
+export function addClient(req: IncomingMessage, res: ServerResponse): void {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -20,7 +29,7 @@ export function addClient(req, res) {
   ensureKeepalive();
 }
 
-export function broadcast(type, data) {
+export function broadcast(type: SseEvent, data: unknown): void {
   const payload = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   // Snapshot to avoid mutation-during-iteration if write triggers a close.
   for (const res of [...clients]) {
@@ -28,7 +37,7 @@ export function broadcast(type, data) {
   }
 }
 
-function ensureKeepalive() {
+function ensureKeepalive(): void {
   if (keepaliveTimer) return;
   keepaliveTimer = setInterval(() => {
     for (const res of [...clients]) {
@@ -38,4 +47,4 @@ function ensureKeepalive() {
   keepaliveTimer.unref?.();
 }
 
-export function clientCount() { return clients.size; }
+export function clientCount(): number { return clients.size; }
