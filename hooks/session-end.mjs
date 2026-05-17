@@ -3,11 +3,11 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// src/hooks/session-end.ts
+// tools/src/hooks/session-end.ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-var dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+var dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 var REG = path.join(dir, "registry.json");
 var sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);

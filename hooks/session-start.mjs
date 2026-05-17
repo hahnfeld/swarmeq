@@ -3,19 +3,24 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// src/hooks/session-start.ts
+// tools/src/hooks/session-start.ts
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-var dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+var dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
 var REG = path.join(dir, "registry.json");
 var PORT = path.join(dir, ".port");
 var PID = path.join(dir, ".pid");
 var sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
+var cleanModel = (s) => {
+  const raw = String(s || "").trim().replace(/\[[^\]]*\]$/, "");
+  const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 64);
+  return cleaned || "unknown";
+};
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
 async function probeDaemon(p) {
   return new Promise((resolve) => {
@@ -134,7 +139,7 @@ process.stdin.on("end", async () => {
     }
     reg[agent] = {
       session_id: sid,
-      model: sanitize(evt.model || process.env.ANTHROPIC_MODEL || "unknown"),
+      model: cleanModel(evt.model || process.env.ANTHROPIC_MODEL || "unknown"),
       cwd: evt.cwd || process.cwd(),
       started_ts: Date.now(),
       last_seen_ts: Date.now()

@@ -38,6 +38,14 @@ cd tools && npm run typecheck
 
 This runs `tsc --noEmit` in strict mode. The build itself doesn't gate on type errors — esbuild ignores them — so the typecheck script is your safety net.
 
+Run the test suite:
+
+```bash
+cd tools && npm test
+```
+
+Uses Node's built-in `node:test` runner — no extra dependencies. Tests import the `.ts` source directly via native type-stripping, so they require **Node 22+**. Each test file isolates state via `SWARMEQ_STATE_DIR` (a tmp dir per test) so runs never touch your real `~/.claude/plugins/swarmeq/state`. Helpers live in `tools/test/_helpers.mjs`.
+
 ## Testing locally
 
 Install the plugin from a local checkout:

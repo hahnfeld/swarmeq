@@ -3,13 +3,13 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// src/hooks/stop.ts
+// tools/src/hooks/stop.ts
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-var dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+var dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 var REG = path.join(dir, "registry.json");
 var PORT = path.join(dir, ".port");
 var PROBE_MIN_MS = 9e4;

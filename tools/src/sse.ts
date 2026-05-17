@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 export type SseEvent =
   | "report"
   | "probe-failed"
+  | "probe-exit"
+  | "probe-no-report"
   | "agent-removed"
   | "sentiment"
   | "model-mismatch";

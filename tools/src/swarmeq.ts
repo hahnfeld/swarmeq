@@ -115,12 +115,15 @@ async function main() {
     case "probe": {
       // Internal: invoked by the Stop hook. Forks a Claude session that
       // calls swarmeq.report once and exits. Fire-and-forget from the hook;
-      // any failure broadcasts probe-failed to the dashboard.
+      // failures are logged to state/probe.log by startProbe itself, so the
+      // outer catch is just to keep this CLI invocation from exiting non-zero
+      // and noising up the parent hook.
       const agent = process.argv[3];
       if (!agent) { process.stderr.write("usage: swarmeq probe <agent>\n"); process.exit(2); }
       await discoverDashboard();
       const { startProbe } = await import("./probe.ts");
-      try { await startProbe(agent); } catch { /* error already broadcast */ }
+      try { await startProbe(agent); }
+      catch (err) { process.stderr.write(`swarmeq probe: ${(err as Error).message}\n`); }
       return;
     }
     case "stop":      return (await import("./ops.ts")).stopServer();

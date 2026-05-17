@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+const dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
 const REG = path.join(dir, "registry.json");
 const PORT = path.join(dir, ".port");
@@ -33,6 +33,18 @@ interface HookEvent {
 }
 
 const sanitize = (s: unknown): string => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
+
+// Model ids must be passed verbatim to `claude --model` later. The 1M-context
+// Opus variant arrives as `claude-opus-4-7[1m]`; sanitize() would mangle the
+// brackets into `_1m_` and the CLI would 404 on the result. Strip a trailing
+// `[...]` suffix instead, then keep only chars valid in a model id. Mirrored
+// in tools/src/paths.ts:cleanModel; hooks are required to be import-free, so
+// the definition is duplicated by design. Tested via paths.cleanModel.
+const cleanModel = (s: unknown): string => {
+  const raw = String(s || "").trim().replace(/\[[^\]]*\]$/, "");
+  const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 64);
+  return cleaned || "unknown";
+};
 
 // Probe forks of agents re-enter this hook on session start. Don't register
 // them as separate agents and don't open another browser tab.
@@ -128,7 +140,7 @@ process.stdin.on("end", async () => {
     try { reg = JSON.parse(fs.readFileSync(REG, "utf8")); } catch {}
     reg[agent] = {
       session_id: sid,
-      model: sanitize(evt.model || process.env.ANTHROPIC_MODEL || "unknown"),
+      model: cleanModel(evt.model || process.env.ANTHROPIC_MODEL || "unknown"),
       cwd: evt.cwd || process.cwd(),
       started_ts: Date.now(),
       last_seen_ts: Date.now(),

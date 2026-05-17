@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+const dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 const REG = path.join(dir, "registry.json");
 const PORT = path.join(dir, ".port");
 

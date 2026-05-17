@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+const dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 const REG = path.join(dir, "registry.json");
 
 // Each hook is intentionally standalone (no imports from tools/src/), so these

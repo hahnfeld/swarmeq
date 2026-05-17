@@ -49,7 +49,10 @@ export function pluginVersion(): string {
 }
 
 export function stateDir(): string {
-  const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
+  // SWARMEQ_STATE_DIR opt-out exists so the test suite can isolate writes
+  // to a tmp dir without touching the user's real plugin state.
+  const dir = process.env.SWARMEQ_STATE_DIR
+    || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -59,9 +62,22 @@ export const PID_FILE = (): string => path.join(stateDir(), ".pid");
 export const REGISTRY_FILE = (): string => path.join(stateDir(), "registry.json");
 export const AGENT_FILE = (agent: string): string => path.join(stateDir(), `${sanitizeAgent(agent)}.json`);
 export const SENTIMENT_FILE = (): string => path.join(stateDir(), "sentiment.jsonl");
+export const PROBE_LOG_FILE = (): string => path.join(stateDir(), "probe.log");
 
 export function sanitizeAgent(s: unknown): string {
   return String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
+}
+
+// Model ids must be passed verbatim to `claude --model`. The 1M-context
+// Opus variant arrives as `claude-opus-4-7[1m]`; sanitizeAgent() would
+// mangle the brackets into `_1m_` and the CLI would 404 on the result.
+// Strip a trailing `[...]` suffix instead, then keep only chars valid in
+// a model id. The bracket suffix is a context-window hint — dropping it
+// leaves the model id the CLI accepts (`claude-opus-4-7`).
+export function cleanModel(s: unknown): string {
+  const raw = String(s || "").trim().replace(/\[[^\]]*\]$/, "");
+  const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 64);
+  return cleaned || "unknown";
 }
 
 // Atomic write: tmp + rename. Avoids partial-read corruption when concurrent

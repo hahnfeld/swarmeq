@@ -34,8 +34,9 @@ Everything swarmeq remembers lives in `~/.claude/plugins/swarmeq/state/`:
 - **`registry.json`** — one entry per *living* teammate. Tracks `session_id`, `model`, `last_seen_ts`, and `last_probe_ts`.
 - **`<agent>.json`** — most recent report for each teammate. One file per agent.
 - **`sentiment.jsonl`** — append-only history of team-wide sentiment over time. Drives the chart.
+- **`probe.log`** — JSONL trace of every probe's lifecycle: `probe-exit` for every run, `probe-failed` for non-zero exits, `probe-no-report` when a probe exits cleanly but never wrote a report. Rotates at 1 MB. Detached probe processes have no SSE clients, so this is the source of truth for "why didn't the dashboard update?"
 
-The daemon is the only writer of `sentiment.jsonl`; MCP children forward to it.
+The daemon is the only writer of `sentiment.jsonl`; MCP children forward to it via `/ingest`. Probe subprocesses also forward their lifecycle events to the daemon's `/probe-event` so live SSE clients see them — the JSONL log is the offline record.
 
 ## How we stay resilient
 

@@ -1,5 +1,17 @@
 # swarmeq changelog
 
+## 0.3.4 — dashboard-empty fixes + test suite
+
+### Fixed
+- `SessionStart` no longer mangles 1M-context model ids. `sanitize()` turned `claude-opus-4-7[1m]` into `claude-opus-4-7_1m_`, which then got passed to `claude --model` by the probe and 404'd in <500ms. A new `cleanModel()` strips the `[…]` context-window suffix and keeps only chars valid in a model id; the registry now stores the unbracketed form the CLI accepts. Existing mangled registries self-heal on the next session start. `probe.ts` also defensively un-mangles old `_1m_`/`_200k_`/`_400k_` entries before spawning.
+- Detached probe failures are no longer silent. Every `probe-failed`, `probe-exit`, `probe-no-report`, and `model-mismatch` event now lands in `state/probe.log` (JSONL, ≤1MB with rotate) *and* is forwarded to the daemon over a new `POST /probe-event` so live SSE clients see them. Previously `broadcast()` was the only sink, and it only reaches clients of the calling process — never the detached probe.
+- Surfaces the "claude exits 0 but never called `mcp__swarmeq__report`" failure mode. The probe now checks whether `AGENT_FILE(agent)` was modified during the run; if not, emits `probe-no-report` with the stdout tail. The root cause (forked-session tool catalog appears frozen) is logged for diagnosis, fix deferred.
+- `swarmeq probe` CLI no longer swallows the wrapper's own errors with `try {} catch {}` — exceptions write to stderr so the call site can see them.
+
+### Added
+- Test suite. New `tools/test/` directory with 14 `node:test`-based test files covering `validate`, `sentiment`, `paths`, `record`, `http`, `bind`, `sweep`, both probing pure-functions, and all three executable hooks via `spawnSync` against the `.ts` source. Run with `npm test` from `tools/`. Each test isolates state via `SWARMEQ_STATE_DIR` (now honored by `paths.ts` and all hooks) so runs never touch the real plugin state. 90 tests pass on Node 22+.
+- `POST /probe-event` HTTP route on the daemon for detached subprocesses to forward SSE events. Capped at 8KB; only the four probe-related `SseEvent` types are accepted.
+
 ## 0.3.3 — seamless plugin upgrades
 
 ### Fixed

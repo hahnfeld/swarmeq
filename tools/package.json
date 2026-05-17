@@ -1,12 +1,13 @@
 {
   "name": "swarmeq-tools",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Maintainer-only build chain for swarmeq. Not shipped to users.",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --test-reporter=spec test/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",

@@ -9,10 +9,15 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 import { bindState } from "./bind.ts";
-import { addClient } from "./sse.ts";
+import { addClient, broadcast } from "./sse.ts";
+import type { SseEvent } from "./sse.ts";
 import { record, readLivingReports } from "./record.ts";
 import { startSweepTimer } from "./sweep.ts";
 import { computeSentiment, readSentimentHistory } from "./sentiment.ts";
+
+const ALLOWED_PROBE_EVENTS: ReadonlySet<SseEvent> = new Set<SseEvent>([
+  "probe-failed", "probe-exit", "probe-no-report", "model-mismatch",
+]);
 
 // Track which Server instances already have our handler attached, without
 // stamping a property onto Node's Server object.
@@ -30,7 +35,9 @@ export function attachRoutes(): void {
   startSweepTimer();
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+// Exported as `handle` so the test suite can drive routes against an
+// ephemeral HTTP server without going through the bind.ts singleton.
+export async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const u = new URL(req.url ?? "/", "http://127.0.0.1");
     const pn = u.pathname;
@@ -44,6 +51,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return serveJSON(res, { points: readSentimentHistory(lim) });
     }
     if (req.method === "POST" && pn === "/ingest")                     return ingest(req, res);
+    if (req.method === "POST" && pn === "/probe-event")                return probeEvent(req, res);
     // Static assets from dashboard/ (logo.png, etc). Path is sanitized: only
     // a single filename with a known image extension, no traversal.
     if (req.method === "GET" && /^\/[a-zA-Z0-9._-]+\.(png|jpe?g|svg|webp|gif|ico)$/.test(pn)) {
@@ -84,6 +92,41 @@ function snapshot() {
   // contribute to the team view or per-agent tabs.
   const agents = readLivingReports();
   return { agents, registry: readRegistry(), sentiment: computeSentiment(agents), ts: Date.now() };
+}
+
+// Detached probe subprocesses POST their events here so SSE clients connected
+// to the daemon receive them — broadcast() alone only reaches clients of the
+// process that calls it, which is never the probe.
+function probeEvent(req: IncomingMessage, res: ServerResponse): void {
+  let body = "";
+  let tooBig = false;
+  req.setEncoding("utf8");
+  req.on("data", (c: string) => {
+    if (tooBig) return;
+    body += c;
+    if (body.length > 8192) {
+      tooBig = true;
+      if (!res.headersSent) { res.writeHead(413, { "Content-Type": "text/plain" }); res.end("payload too large\n"); }
+      req.destroy();
+    }
+  });
+  req.on("end", () => {
+    if (tooBig) return;
+    try {
+      const obj = JSON.parse(body) as { type?: string; data?: unknown };
+      if (!obj || typeof obj.type !== "string" || !ALLOWED_PROBE_EVENTS.has(obj.type as SseEvent)) {
+        res.writeHead(400, { "Content-Type": "text/plain" });
+        res.end("invalid event type\n");
+        return;
+      }
+      broadcast(obj.type as SseEvent, obj.data ?? {});
+      res.writeHead(204);
+      res.end();
+    } catch (err) {
+      if (!res.headersSent) res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end(`${(err as Error).message}\n`);
+    }
+  });
 }
 
 function ingest(req: IncomingMessage, res: ServerResponse): void {
