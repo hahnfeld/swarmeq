@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { dashboardFile, feelingsFile, pluginRoot, REGISTRY_FILE } from "./paths.ts";
+import { dashboardFile, feelingsFile, pluginRoot, readRegistry } from "./paths.ts";
 
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -80,12 +80,10 @@ function serveJSON(res: ServerResponse, data: unknown): void {
 }
 
 function snapshot() {
-  let registry: Record<string, unknown> = {};
-  try { registry = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
   // Living agents only: stale report files for vanished sessions never
   // contribute to the team view or per-agent tabs.
   const agents = readLivingReports();
-  return { agents, registry, sentiment: computeSentiment(agents), ts: Date.now() };
+  return { agents, registry: readRegistry(), sentiment: computeSentiment(agents), ts: Date.now() };
 }
 
 function ingest(req: IncomingMessage, res: ServerResponse): void {

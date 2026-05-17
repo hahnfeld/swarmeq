@@ -59,6 +59,13 @@ export function writeAtomic(file: string, body: string | Buffer): void {
   fs.renameSync(tmp, file);
 }
 
+export function readRegistry(): Registry {
+  try {
+    const obj = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8"));
+    return (obj && typeof obj === "object") ? obj as Registry : {};
+  } catch { return {}; }
+}
+
 export function dashboardFile(): string {
   return path.join(pluginRoot(), "dashboard", "dashboard.html");
 }

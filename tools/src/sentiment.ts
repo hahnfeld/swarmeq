@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { SENTIMENT_FILE, feelingsFile } from "./paths.ts";
+import { SENTIMENT_FILE, feelingsFile, writeAtomic } from "./paths.ts";
 import { broadcast } from "./sse.ts";
 import type { ReportsByAgent } from "./record.ts";
 
@@ -89,18 +89,26 @@ export function appendSentimentPoint(point: SentimentPoint): void {
     const all = fs.readFileSync(SENTIMENT_FILE(), "utf8").split("\n").filter(Boolean);
     if (all.length <= HISTORY_CAP) return;
     const trimmed = all.slice(-HISTORY_CAP).join("\n") + "\n";
-    fs.writeFileSync(SENTIMENT_FILE() + ".tmp", trimmed);
-    fs.renameSync(SENTIMENT_FILE() + ".tmp", SENTIMENT_FILE());
+    writeAtomic(SENTIMENT_FILE(), trimmed);
   } catch {}
 }
 
+let _lastPoint: SentimentPoint | null = null;
+
 // Recompute team sentiment from the given agents map, persist a point to
-// history, and SSE-broadcast it. Returns the appended point.
+// history, and SSE-broadcast it. Skips append+broadcast when the aggregate
+// is identical to the previous one (so a probe burst from a single agent
+// doesn't fill the JSONL with duplicates or wake every SSE client on a
+// no-op). Returns the appended point, or the previous one if skipped.
 export function snapshotAndBroadcast(agents: ReportsByAgent): SentimentPoint {
   const s = computeSentiment(agents);
   const point: SentimentPoint = { ts: Date.now(), ratio: s.ratio, agentCount: s.agentCount };
+  if (_lastPoint && _lastPoint.ratio === point.ratio && _lastPoint.agentCount === point.agentCount) {
+    return _lastPoint;
+  }
   appendSentimentPoint(point);
   broadcast("sentiment", point);
+  _lastPoint = point;
   return point;
 }
 

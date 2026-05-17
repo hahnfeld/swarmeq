@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { AGENT_FILE, REGISTRY_FILE, stateDir, writeAtomic } from "./paths.ts";
+import { AGENT_FILE, readRegistry, stateDir, writeAtomic } from "./paths.ts";
 import { bindState, readActivePort } from "./bind.ts";
 import { broadcast } from "./sse.ts";
 import { validateReport } from "./validate.ts";
@@ -50,8 +50,7 @@ export async function record(raw: unknown): Promise<Report> {
 // aggregates. Drops report files left behind when SessionEnd didn't run
 // before the sweep reaped them.
 export function readLivingReports(): ReportsByAgent {
-  let reg: Record<string, unknown> = {};
-  try { reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
+  const reg = readRegistry();
   const all = readAllReports();
   const out: ReportsByAgent = {};
   for (const name of Object.keys(all)) {

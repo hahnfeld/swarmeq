@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
-import { REGISTRY_FILE, pluginRoot } from "./paths.ts";
-import type { Registry, RegistryEntry } from "./paths.ts";
+import { pluginRoot, readRegistry } from "./paths.ts";
+import type { RegistryEntry } from "./paths.ts";
 import { broadcast } from "./sse.ts";
 import { introspectionPrompt } from "./prompt.ts";
 
@@ -110,10 +109,5 @@ export async function startProbe(agent: string): Promise<void> {
 }
 
 function lookupAgent(agent: string): RegistryEntry | null {
-  try {
-    const reg = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")) as Registry;
-    return reg[agent] || null;
-  } catch {
-    return null;
-  }
+  return readRegistry()[agent] || null;
 }

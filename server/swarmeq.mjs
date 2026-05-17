@@ -66,6 +66,14 @@ function writeAtomic(file, body) {
   fs.writeFileSync(tmp, body);
   fs.renameSync(tmp, file);
 }
+function readRegistry() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8"));
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
+  }
+}
 function dashboardFile() {
   return path.join(pluginRoot(), "dashboard", "dashboard.html");
 }
@@ -455,16 +463,19 @@ function appendSentimentPoint(point) {
     const all = fs4.readFileSync(SENTIMENT_FILE(), "utf8").split("\n").filter(Boolean);
     if (all.length <= HISTORY_CAP) return;
     const trimmed = all.slice(-HISTORY_CAP).join("\n") + "\n";
-    fs4.writeFileSync(SENTIMENT_FILE() + ".tmp", trimmed);
-    fs4.renameSync(SENTIMENT_FILE() + ".tmp", SENTIMENT_FILE());
+    writeAtomic(SENTIMENT_FILE(), trimmed);
   } catch {
   }
 }
 function snapshotAndBroadcast(agents) {
   const s = computeSentiment(agents);
   const point = { ts: Date.now(), ratio: s.ratio, agentCount: s.agentCount };
+  if (_lastPoint && _lastPoint.ratio === point.ratio && _lastPoint.agentCount === point.agentCount) {
+    return _lastPoint;
+  }
   appendSentimentPoint(point);
   broadcast("sentiment", point);
+  _lastPoint = point;
   return point;
 }
 function readSentimentHistory(limit = HISTORY_CAP) {
@@ -485,7 +496,7 @@ function readSentimentHistory(limit = HISTORY_CAP) {
   }
   return out;
 }
-var POSITIVE_CORES, NEGATIVE_CORES, HISTORY_CAP, _labelToCore;
+var POSITIVE_CORES, NEGATIVE_CORES, HISTORY_CAP, _labelToCore, _lastPoint;
 var init_sentiment = __esm({
   "src/sentiment.ts"() {
     "use strict";
@@ -495,6 +506,7 @@ var init_sentiment = __esm({
     NEGATIVE_CORES = /* @__PURE__ */ new Set(["mad", "sad", "scared"]);
     HISTORY_CAP = 1e3;
     _labelToCore = null;
+    _lastPoint = null;
   }
 });
 
@@ -528,11 +540,7 @@ async function record(raw) {
   return report;
 }
 function readLivingReports() {
-  let reg = {};
-  try {
-    reg = JSON.parse(fs5.readFileSync(REGISTRY_FILE(), "utf8"));
-  } catch {
-  }
+  const reg = readRegistry();
   const all = readAllReports();
   const out = {};
   for (const name of Object.keys(all)) {
@@ -15838,12 +15846,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs12, exportName) {
+    function addFormats(ajv, list, fs11, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs12[f]);
+        ajv.addFormat(f, fs11[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -16771,7 +16779,6 @@ __export(probe_exports, {
   startProbe: () => startProbe
 });
 import { spawn } from "node:child_process";
-import fs8 from "node:fs";
 import path5 from "node:path";
 async function startProbe(agent) {
   const entry = lookupAgent(agent);
@@ -16873,12 +16880,7 @@ async function startProbe(agent) {
   });
 }
 function lookupAgent(agent) {
-  try {
-    const reg = JSON.parse(fs8.readFileSync(REGISTRY_FILE(), "utf8"));
-    return reg[agent] || null;
-  } catch {
-    return null;
-  }
+  return readRegistry()[agent] || null;
 }
 var PROBE_TIMEOUT_MS;
 var init_probe = __esm({
@@ -16896,11 +16898,11 @@ var ops_exports = {};
 __export(ops_exports, {
   stopServer: () => stopServer
 });
-import fs9 from "node:fs";
+import fs8 from "node:fs";
 async function stopServer() {
   let pid = 0;
   try {
-    pid = parseInt(fs9.readFileSync(PID_FILE(), "utf8"), 10);
+    pid = parseInt(fs8.readFileSync(PID_FILE(), "utf8"), 10);
   } catch {
   }
   if (!pid) {
@@ -16929,7 +16931,7 @@ var doctor_exports = {};
 __export(doctor_exports, {
   runDoctor: () => runDoctor
 });
-import fs10 from "node:fs";
+import fs9 from "node:fs";
 import { execSync } from "node:child_process";
 function row(name, ok, hint = "") {
   const sym = ok ? "\u2713" : "\u2717";
@@ -16969,7 +16971,7 @@ async function runDoctor() {
   let writable = false;
   try {
     const d = stateDir();
-    fs10.accessSync(d, fs10.constants.W_OK);
+    fs9.accessSync(d, fs9.constants.W_OK);
     writable = true;
   } catch {
   }
@@ -16995,7 +16997,7 @@ var init_doctor = __esm({
 
 // src/swarmeq.ts
 init_bind();
-import fs11 from "node:fs";
+import fs10 from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import os2 from "node:os";
 
@@ -17068,7 +17070,7 @@ function sweepStaleAgents() {
   lastSeen.clear();
   for (const a of live) lastSeen.add(a);
   primed = true;
-  if (removed.length > 0) snapshotAndBroadcast(readAllReports());
+  if (removed.length > 0) snapshotAndBroadcast(readLivingReports());
   return removed;
 }
 function startSweepTimer() {
@@ -17145,13 +17147,8 @@ function serveJSON(res, data) {
   res.end(body);
 }
 function snapshot() {
-  let registry2 = {};
-  try {
-    registry2 = JSON.parse(fs7.readFileSync(REGISTRY_FILE(), "utf8"));
-  } catch {
-  }
   const agents = readLivingReports();
-  return { agents, registry: registry2, sentiment: computeSentiment(agents), ts: Date.now() };
+  return { agents, registry: readRegistry(), sentiment: computeSentiment(agents), ts: Date.now() };
 }
 function ingest(req, res) {
   let body = "";
@@ -17221,11 +17218,11 @@ async function cmdDaemon() {
   const active = await readActivePort();
   if (!active) {
     try {
-      fs11.unlinkSync(PORT_FILE());
+      fs10.unlinkSync(PORT_FILE());
     } catch {
     }
     try {
-      fs11.unlinkSync(PID_FILE());
+      fs10.unlinkSync(PID_FILE());
     } catch {
     }
   }

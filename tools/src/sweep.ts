@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { AGENT_FILE, stateDir } from "./paths.ts";
 import { broadcast } from "./sse.ts";
-import { readAllReports } from "./record.ts";
+import { readLivingReports } from "./record.ts";
 import { snapshotAndBroadcast } from "./sentiment.ts";
 
 const STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -70,8 +70,9 @@ export function sweepStaleAgents(): string[] {
 
   // If anything actually changed, refresh the sentiment chart so removing
   // a sad agent (etc.) shows up immediately on /team without waiting for
-  // the next live report.
-  if (removed.length > 0) snapshotAndBroadcast(readAllReports());
+  // the next live report. Living-only: a just-removed agent must not
+  // contribute to the very point we're broadcasting because of its removal.
+  if (removed.length > 0) snapshotAndBroadcast(readLivingReports());
 
   return removed;
 }
