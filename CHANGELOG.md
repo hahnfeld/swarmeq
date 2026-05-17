@@ -1,12 +1,23 @@
 # swarmeq changelog
 
-## Unreleased — always-on daemon + auto-probe
+## 0.3.0 — TypeScript + always-on daemon
 
 ### Changed (breaking)
 - Dashboard runs as a true detached daemon. `/swarmeq` is renamed to `/swarmeq-dashboard` and is now non-blocking: it forks the daemon, polls until reachable, opens the browser, and returns. Previously the slash command's `!node …` invocation held the foreground process forever (the binder), which stalled Claude Code's UI until the user killed the dashboard.
 - Probing is automatic. Every `Stop` hook fires a per-agent probe, throttled to at most one probe per 90s (tracked via `last_probe_ts` in `registry.json`). The probe fork inherits `SWARMEQ_PROBE=1`, which short-circuits the hooks in the forked session so probes don't probe themselves.
 - `/swarmeq-check` and `/swarmeq-poll` are removed — both are subsumed by auto-probe.
 - Dashboard UI: "probe" and "probe all" buttons are gone; the portrait now shows a minimal `last updated · Xs ago` line. `POST /probe` and `POST /probe/:agent` HTTP routes and the `swarmeq probe-all` / `swarmeq check` / `swarmeq poll` subcommands are removed.
+
+### Added
+- TypeScript migration (server + hooks). All sources under `tools/src/` are now `.ts` with `tsc --strict` clean; `esbuild` still emits `server/swarmeq.mjs` and `hooks/*.mjs`. Hook bundles remain fully self-contained (zero shared runtime imports). New `npm run typecheck` step in the maintainer build chain. Runtime architecture is unchanged.
+- Cold-start polish: only the foreground `/swarmeq-dashboard` opens the browser; the auto-spawned daemon doesn't. Stale `.port` / `.pid` are scrubbed up-front when a fresh daemon starts. Self-termination heartbeat in the bound daemon reclaims `.pid` / `.port` if a yielding peer's cleanup raced ahead.
+- Docs: README warm-up section, `docs/ARCHITECTURE.md`, `CONTRIBUTING.md`, and dashboard screenshots (`docs/screenshot-individual.png`, `docs/screenshot-team.png`).
+
+### Fixed
+- Sweep no longer broadcasts a sentiment point built from dead agents. `sweepStaleAgents()` now calls `snapshotAndBroadcast(readLivingReports())` after removals — previously it passed `readAllReports()`, briefly violating the team-view living-only invariant.
+- `appendSentimentPoint()` swapped its hand-rolled `.tmp + rename` (fixed suffix, race-prone under concurrent trim) for the shared `writeAtomic()` helper which pid+timestamp-suffixes the tmp file.
+- `snapshotAndBroadcast()` skips the JSONL append and SSE broadcast when ratio + agentCount are identical to the previous point. Probe-bursts no longer fill the history with duplicates or wake every SSE client on a no-op.
+- Three slightly-different inline registry-read idioms (`http.snapshot()`, `record.readLivingReports()`, `probe.lookupAgent()`) collapsed onto a single typed `paths.readRegistry()`. Side effect: `GET /state` parses `registry.json` once per request instead of twice.
 
 ## 0.2.0 — team dashboard + reliability
 
