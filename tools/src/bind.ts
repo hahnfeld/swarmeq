@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import type { Server } from "node:http";
-import { PORT_FILE, PID_FILE } from "./paths.ts";
+import { PORT_FILE, PID_FILE, pluginRoot, pluginVersion } from "./paths.ts";
 
 const PORT_RANGE = { start: 7777, end: 7790 };
 
@@ -135,36 +136,100 @@ export async function discoverDashboard(): Promise<BindState> {
 }
 
 // Probe the recorded dashboard port and verify it actually serves swarmeq —
-// not some unrelated process that grabbed the port after we recorded it.
-// Returns the port number on success, null otherwise.
+// not some unrelated process that grabbed the port after we recorded it, and
+// not a daemon left behind by a previous plugin install whose cached
+// pluginRoot points at a temp dir the loader has already GC'd. Returns the
+// port number on success, null otherwise. Stale-but-swarmeq daemons are
+// SIGTERM'd in-line so the next caller can bind a fresh one.
 export async function readActivePort(): Promise<number | null> {
   let port: number | null = null;
   try { port = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10); } catch {}
   if (!port) return null;
-  return (await isSwarmeqHealthy(port)) ? port : null;
+  const id = await probeSwarmeq(port);
+  if (!id) return null;
+  if (isStaleIdentity(id)) {
+    await evictStaleDaemon(port, id);
+    return null;
+  }
+  return port;
 }
 
-// GET /healthz and confirm the JSON marker. Cheap identity check so we never
-// open a browser tab at, or forward MCP ingest to, a foreign service that
-// happens to be listening on our port.
-export async function isSwarmeqHealthy(port: number, timeoutMs = 800): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+export interface DaemonIdentity {
+  pid: number;
+  version: string;
+  root: string;
+}
+
+// GET /healthz and parse the identity envelope. Returns identity on a valid
+// swarmeq daemon; null on timeout, foreign service, or malformed payload.
+// Cheap identity check so we never open a browser tab at, or forward MCP
+// ingest to, a foreign service that happens to be listening on our port.
+export async function probeSwarmeq(port: number, timeoutMs = 800): Promise<DaemonIdentity | null> {
+  return new Promise<DaemonIdentity | null>((resolve) => {
     const req = http.request({
       host: "127.0.0.1", port, path: "/healthz", method: "GET", timeout: timeoutMs,
     }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); return resolve(false); }
+      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
       let body = "";
       res.setEncoding("utf8");
-      res.on("data", (c: string) => { body += c; if (body.length > 256) { req.destroy(); resolve(false); } });
+      res.on("data", (c: string) => { body += c; if (body.length > 1024) { req.destroy(); resolve(null); } });
       res.on("end", () => {
         try {
           const obj = JSON.parse(body);
-          resolve(!!(obj && obj.service === "swarmeq"));
-        } catch { resolve(false); }
+          if (!obj || obj.service !== "swarmeq") return resolve(null);
+          resolve({
+            pid: Number(obj.pid) || 0,
+            version: String(obj.version || ""),
+            root: String(obj.root || ""),
+          });
+        } catch { resolve(null); }
       });
     });
-    req.once("error", () => resolve(false));
-    req.once("timeout", () => { req.destroy(); resolve(false); });
+    req.once("error", () => resolve(null));
+    req.once("timeout", () => { req.destroy(); resolve(null); });
     req.end();
+  });
+}
+
+// A daemon is stale when its pluginRoot differs from ours, or when /healthz
+// doesn't expose a root at all (pre-0.3.3 daemons). Version drift is also
+// stale even within the same root — `npm i -g`-style reinstalls reuse paths
+// but bump the version, and the daemon's bundled code is frozen at start.
+//
+// Defensive: if we can't resolve our own pluginRoot (e.g., this module is
+// loaded outside the plugin), do nothing — better to keep serving than to
+// kill a working daemon based on bad input.
+function isStaleIdentity(id: DaemonIdentity): boolean {
+  let localRoot: string;
+  try { localRoot = pluginRoot(); } catch { return false; }
+  if (!id.root) return true;
+  if (id.root !== localRoot) return true;
+  if (id.version && id.version !== pluginVersion()) return true;
+  return false;
+}
+
+async function evictStaleDaemon(port: number, id: DaemonIdentity): Promise<void> {
+  if (id.pid > 0) {
+    try { process.kill(id.pid, "SIGTERM"); } catch {}
+  }
+  // Wait briefly for the daemon to release the port. Its SIGTERM handler in
+  // bindDashboardPort() above unlinks .port/.pid synchronously before exit.
+  for (let i = 0; i < 30; i++) {
+    if (!(await isPortListening(port))) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  // Belt-and-suspenders: if the old process was SIGKILL'd or frozen and
+  // never ran its own cleanup, clear the state files ourselves so the next
+  // bind attempt sees a clean slate.
+  try { fs.unlinkSync(PORT_FILE()); } catch {}
+  try { fs.unlinkSync(PID_FILE()); } catch {}
+}
+
+async function isPortListening(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const sock = net.createConnection({ host: "127.0.0.1", port });
+    sock.once("connect", () => { sock.end(); resolve(true); });
+    sock.once("error", () => resolve(false));
+    sock.setTimeout(200, () => { sock.destroy(); resolve(false); });
   });
 }

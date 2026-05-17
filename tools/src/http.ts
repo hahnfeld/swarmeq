@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { dashboardFile, feelingsFile, pluginRoot, readRegistry } from "./paths.ts";
+import { dashboardFile, feelingsFile, pluginRoot, pluginVersion, readRegistry } from "./paths.ts";
 
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -38,7 +38,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     if (req.method === "GET" && pn === "/feelings.json")               return serveFile(res, feelingsFile(), "application/json");
     if (req.method === "GET" && pn === "/events")                      return addClient(req, res);
     if (req.method === "GET" && pn === "/state")                       return serveJSON(res, snapshot());
-    if (req.method === "GET" && pn === "/healthz")                     return serveJSON(res, { service: "swarmeq", pid: process.pid });
+    if (req.method === "GET" && pn === "/healthz")                     return serveJSON(res, { service: "swarmeq", pid: process.pid, version: pluginVersion(), root: pluginRoot() });
     if (req.method === "GET" && pn === "/history") {
       const lim = Math.max(1, Math.min(2000, parseInt(u.searchParams.get("limit") || "500", 10) || 500));
       return serveJSON(res, { points: readSentimentHistory(lim) });

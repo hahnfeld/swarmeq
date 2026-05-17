@@ -66,7 +66,7 @@ A few non-obvious design rules baked into the code. Following them keeps the sys
 - **Only the daemon binds the HTTP port.** MCP children call `discoverDashboard()`, never `bindDashboardPort()`. This prevents N silent dashboards (one per Claude Code session) that nobody is watching.
 - **Only the daemon writes `sentiment.jsonl`.** MCP children forward to the daemon's `/ingest`. Otherwise concurrent appends would race.
 - **`SWARMEQ_PROBE=1` is sacred.** All hooks check it and exit early. Without that guard, every probe fork would spawn another probe fork on its own Stop hook, and Claude API spend would skyrocket.
-- **`/healthz` is the only adoption check.** Anywhere that trusts a recorded `.port`, it must verify via `isSwarmeqHealthy()` first. Never trust raw TCP reachability — a foreign service could have grabbed the port.
+- **`/healthz` is the only adoption check.** Anywhere that trusts a recorded `.port`, it must go through `readActivePort()` (or, in standalone hooks, an inline probe of the same shape). The probe checks the JSON marker `{"service":"swarmeq"}` *and* the daemon's `version` + `root`. A daemon whose `root` doesn't match this install (or that predates the identity envelope) is SIGTERM'd and its `.port`/`.pid` cleared — that's how plugin upgrades stay seamless. Never trust raw TCP reachability: a foreign service could have grabbed the port, and a same-port daemon left behind by an older install would serve from a deleted temp dir.
 
 ## Commit style
 

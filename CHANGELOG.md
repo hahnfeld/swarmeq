@@ -1,5 +1,13 @@
 # swarmeq changelog
 
+## 0.3.3 — seamless plugin upgrades
+
+### Fixed
+- Plugin upgrades no longer leave behind a broken daemon. The always-on daemon (0.3.0+) caches its `pluginRoot` at startup; when the user upgrades the plugin via `--plugin-url`, Claude Code unpacks the new version into a fresh temp dir and eventually GCs the old one, but the daemon — still running — keeps reading from the deleted path. Every dashboard fetch then 500s with `ENOENT … dashboard/dashboard.html`. The daemon now publishes its `pluginRoot` and `version` on `GET /healthz`; on every `readActivePort()` probe a mismatch triggers SIGTERM + state-file cleanup, and the next caller binds a fresh daemon from the current install. The `SessionStart` hook does the same check inline (hooks stay zero-import) and respawns just the daemon — not the full `dashboard` subcommand — when a stale one is evicted, so the user's existing browser tab reconnects via SSE instead of getting a duplicate window. Pre-0.3.3 daemons (no identity in `/healthz`) are treated as stale and evicted on first contact, so the very first session after upgrading from any older release self-heals.
+
+### Added
+- `swarmeq doctor` reports a `daemon matches this install` row, showing the running daemon's version + root and flagging drift from the local install.
+
 ## 0.3.2 — drop explicit hooks pointer from plugin.json
 
 ### Fixed

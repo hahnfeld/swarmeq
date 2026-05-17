@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
 const REG = path.join(dir, "registry.json");
 const PORT = path.join(dir, ".port");
+const PID = path.join(dir, ".pid");
 
 // Each hook is intentionally standalone (no imports from tools/src/), so these
 // types are repeated rather than shared. Hook bundles must remain self-
@@ -36,20 +38,47 @@ const sanitize = (s: unknown): string => String(s || "").replace(/[^a-zA-Z0-9._-
 // them as separate agents and don't open another browser tab.
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
 
-async function portReachable(p: number): Promise<boolean> {
-  return new Promise<boolean>((res) => {
-    const sock = net.createConnection({ host: "127.0.0.1", port: p });
-    sock.once("connect", () => { sock.end(); res(true); });
-    sock.once("error", () => res(false));
-    sock.setTimeout(500, () => { sock.destroy(); res(false); });
+interface DaemonIdentity { pid: number; root: string; version: string }
+
+async function probeDaemon(p: number): Promise<DaemonIdentity | null> {
+  return new Promise<DaemonIdentity | null>((resolve) => {
+    const req = http.request({
+      host: "127.0.0.1", port: p, path: "/healthz", method: "GET", timeout: 500,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c: string) => { body += c; if (body.length > 1024) { req.destroy(); resolve(null); } });
+      res.on("end", () => {
+        try {
+          const obj = JSON.parse(body);
+          if (!obj || obj.service !== "swarmeq") return resolve(null);
+          resolve({ pid: Number(obj.pid) || 0, root: String(obj.root || ""), version: String(obj.version || "") });
+        } catch { resolve(null); }
+      });
+    });
+    req.once("error", () => resolve(null));
+    req.once("timeout", () => { req.destroy(); resolve(null); });
+    req.end();
   });
 }
 
-// Cold-start only: if the daemon is already running, do nothing — the user
-// already has the tab open (and reopening on every session restart spams
-// tabs on Linux/Windows, where `xdg-open` / `start ""` aren't idempotent).
-// When no daemon is detected, spawn `swarmeq dashboard`, which forks the
-// daemon and opens the browser to land the user on the dashboard.
+async function portReleased(p: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const sock = net.createConnection({ host: "127.0.0.1", port: p });
+    sock.once("connect", () => { sock.end(); resolve(false); });
+    sock.once("error", () => resolve(true));
+    sock.setTimeout(200, () => { sock.destroy(); resolve(true); });
+  });
+}
+
+// Cold-start path: if no daemon is running, spawn `swarmeq dashboard` so the
+// browser pops up on the user's first interaction.
+// Upgrade path: if a daemon is running but it was started from a previous
+// plugin install (different pluginRoot), kill it and respawn just the
+// daemon — the user's existing dashboard tab will reconnect via SSE, no need
+// to open a second tab. Reopening on every session restart spams tabs on
+// Linux/Windows where `xdg-open`/`start ""` aren't idempotent.
 async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;
@@ -57,9 +86,28 @@ async function ensureDashboard() {
   if (!fs.existsSync(script)) return;
   let port = 0;
   try { port = parseInt(fs.readFileSync(PORT, "utf8"), 10); } catch {}
-  if (port && (await portReachable(port))) return;
+  let hadPort = port > 0;
+  if (port) {
+    const id = await probeDaemon(port);
+    if (id && id.root === root) return; // healthy daemon owned by this install
+    if (id) {
+      // Stale daemon from an earlier install (or pre-identity build that
+      // didn't expose root). Evict; the bind attempt below will succeed.
+      if (id.pid > 0) { try { process.kill(id.pid, "SIGTERM"); } catch {} }
+      for (let i = 0; i < 30; i++) {
+        if (await portReleased(port)) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      try { fs.unlinkSync(PORT); } catch {}
+      try { fs.unlinkSync(PID); } catch {}
+    }
+  }
+  // If the user already had a dashboard tab open before this hook fired,
+  // spawn just the daemon (no browser). Cold start spawns the dashboard
+  // subcommand so the browser opens on first use.
+  const sub = hadPort ? "_daemon" : "dashboard";
   try {
-    const child = spawn("node", [script, "dashboard"], {
+    const child = spawn("node", [script, sub], {
       detached: true,
       stdio: "ignore",
       env: process.env,

@@ -3,7 +3,7 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// tools/src/hooks/subagent-stop.ts
+// src/hooks/subagent-stop.ts
 process.stdin.resume();
 process.stdin.on("end", () => process.exit(0));
 process.stdin.on("data", () => {

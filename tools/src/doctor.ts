@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { execSync } from "node:child_process";
-import { stateDir } from "./paths.ts";
-import { tryBind } from "./bind.ts";
+import { PORT_FILE, pluginRoot, pluginVersion, stateDir } from "./paths.ts";
+import { probeSwarmeq, tryBind } from "./bind.ts";
 
 function row(name: string, ok: boolean, hint = ""): string {
   const sym = ok ? "✓" : "✗";
@@ -50,6 +50,28 @@ export async function runDoctor(): Promise<void> {
     writable = true;
   } catch {}
   lines.push(row("state/ writable", writable, "check ~/.claude/plugins/swarmeq/state perms"));
+
+  // Surface the running daemon's identity. The eviction logic in
+  // readActivePort() already auto-kills stale daemons on every probe, so this
+  // row mostly confirms "you're on the current install" — but it also gives
+  // users something to point at when filing bugs.
+  let runningPort = 0;
+  try { runningPort = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10); } catch {}
+  if (runningPort > 0) {
+    const id = await probeSwarmeq(runningPort);
+    if (id) {
+      const localRoot = (() => { try { return pluginRoot(); } catch { return ""; } })();
+      const localVer = pluginVersion();
+      const stale = (!id.root) || (localRoot && id.root !== localRoot) || (id.version && id.version !== localVer);
+      lines.push(row(
+        `daemon matches this install`,
+        !stale,
+        stale ? `daemon pid ${id.pid} v${id.version || "?"} from ${id.root || "<unknown>"}; local is v${localVer} from ${localRoot}. it will be evicted on next /swarmeq-dashboard or session start.` : "",
+      ));
+    } else {
+      lines.push(row("daemon reachable on recorded port", false, `port ${runningPort} not answering /healthz; run \`swarmeq stop\` to clear stale state`));
+    }
+  }
 
   // Check that the installed claude supports --fork-session by grepping --help.
   // Avoids API spend; the actual fork-probe is exercised on tab click.

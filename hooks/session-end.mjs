@@ -3,7 +3,7 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// tools/src/hooks/session-end.ts
+// src/hooks/session-end.ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

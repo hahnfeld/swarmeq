@@ -35,6 +35,19 @@ export function pluginRoot(): string {
   throw new Error(`cannot locate plugin root from ${import.meta.dirname}`);
 }
 
+// Used as an identity signal in /healthz so a new plugin process can detect a
+// daemon left behind by an earlier install. Cached because plugin.json never
+// changes within a single process lifetime.
+let _version: string | null = null;
+export function pluginVersion(): string {
+  if (_version !== null) return _version;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(pluginRoot(), ".claude-plugin", "plugin.json"), "utf8"));
+    _version = String(pkg.version || "");
+  } catch { _version = ""; }
+  return _version;
+}
+
 export function stateDir(): string {
   const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
   fs.mkdirSync(dir, { recursive: true });

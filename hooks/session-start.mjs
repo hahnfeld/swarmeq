@@ -3,8 +3,9 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// tools/src/hooks/session-start.ts
+// src/hooks/session-start.ts
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -13,19 +14,60 @@ var dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
 var REG = path.join(dir, "registry.json");
 var PORT = path.join(dir, ".port");
+var PID = path.join(dir, ".pid");
 var sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
-async function portReachable(p) {
-  return new Promise((res) => {
+async function probeDaemon(p) {
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: "127.0.0.1",
+      port: p,
+      path: "/healthz",
+      method: "GET",
+      timeout: 500
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve(null);
+      }
+      let body2 = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => {
+        body2 += c;
+        if (body2.length > 1024) {
+          req.destroy();
+          resolve(null);
+        }
+      });
+      res.on("end", () => {
+        try {
+          const obj = JSON.parse(body2);
+          if (!obj || obj.service !== "swarmeq") return resolve(null);
+          resolve({ pid: Number(obj.pid) || 0, root: String(obj.root || ""), version: String(obj.version || "") });
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.once("error", () => resolve(null));
+    req.once("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+async function portReleased(p) {
+  return new Promise((resolve) => {
     const sock = net.createConnection({ host: "127.0.0.1", port: p });
     sock.once("connect", () => {
       sock.end();
-      res(true);
+      resolve(false);
     });
-    sock.once("error", () => res(false));
-    sock.setTimeout(500, () => {
+    sock.once("error", () => resolve(true));
+    sock.setTimeout(200, () => {
       sock.destroy();
-      res(false);
+      resolve(true);
     });
   });
 }
@@ -39,9 +81,34 @@ async function ensureDashboard() {
     port = parseInt(fs.readFileSync(PORT, "utf8"), 10);
   } catch {
   }
-  if (port && await portReachable(port)) return;
+  let hadPort = port > 0;
+  if (port) {
+    const id = await probeDaemon(port);
+    if (id && id.root === root) return;
+    if (id) {
+      if (id.pid > 0) {
+        try {
+          process.kill(id.pid, "SIGTERM");
+        } catch {
+        }
+      }
+      for (let i = 0; i < 30; i++) {
+        if (await portReleased(port)) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      try {
+        fs.unlinkSync(PORT);
+      } catch {
+      }
+      try {
+        fs.unlinkSync(PID);
+      } catch {
+      }
+    }
+  }
+  const sub = hadPort ? "_daemon" : "dashboard";
   try {
-    const child = spawn("node", [script, "dashboard"], {
+    const child = spawn("node", [script, sub], {
       detached: true,
       stdio: "ignore",
       env: process.env

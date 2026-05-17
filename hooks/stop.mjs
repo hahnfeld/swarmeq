@@ -3,7 +3,7 @@
 // Source: tools/src/*.ts. Rebuild: `node tools/build.mjs`.
 
 
-// tools/src/hooks/stop.ts
+// src/hooks/stop.ts
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";

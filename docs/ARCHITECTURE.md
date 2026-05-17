@@ -39,10 +39,11 @@ The daemon is the only writer of `sentiment.jsonl`; MCP children forward to it.
 
 ## How we stay resilient
 
-Three small mechanisms keep things working even when the world is messy:
+Four small mechanisms keep things working even when the world is messy:
 
 - **Port walk.** The daemon tries 7777, then 7778, … up to 7790, until it finds one free. If you have another app already on 7777, swarmeq lands on 7778 and writes that to `.port`. Clients always read the recorded port.
-- **Identity check.** Before trusting any recorded port, swarmeq hits `/healthz` and checks for the marker `{"service":"swarmeq"}`. If some unrelated app grabbed the port, the check fails and swarmeq treats it as "no daemon" — never adopts a foreign service or sends it your data.
+- **Identity check.** Before trusting any recorded port, swarmeq hits `/healthz` and reads the marker `{"service":"swarmeq", "pid", "version", "root"}`. If some unrelated app grabbed the port, the check fails and swarmeq treats it as "no daemon" — never adopts a foreign service or sends it your data.
+- **Seamless upgrades.** That same identity check also catches daemons left behind by an earlier plugin install: when `root` doesn't match this install (or is missing, as in pre-0.3.3 builds), the probing process SIGTERMs the daemon, clears `.port`/`.pid`, and lets the next caller bind a fresh one. The user's open dashboard tab reconnects via SSE — no duplicate window. Plugin upgrades work end-to-end without any manual `swarmeq stop`.
 - **Heartbeat.** If two daemons race to start simultaneously (rare but possible), each runs a 5-second `setInterval` that reads `.pid`. Whichever wrote `.pid` last is the canonical owner; the loser notices the mismatch and SIGTERMs itself. Yields without zombies, never deletes the winner's files.
 
 ## Hooks at a glance
