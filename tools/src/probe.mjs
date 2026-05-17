@@ -79,8 +79,16 @@ export async function startProbe(agent) {
       cleanup();
       if (code !== 0) {
         const tail = stderr.slice(-500) || stdout.slice(-500);
-        broadcast("probe-failed", { agent, reason: `claude exited ${code}: ${tail}` });
-        return reject(new Error(`claude exit ${code}: ${tail}`));
+        // Older Claude Code versions (<2.1.117) reject --fork-session /
+        // --no-session-persistence as unknown options. Detect that pattern
+        // and emit an actionable reason instead of the raw stderr tail.
+        const old = /unknown option/i.test(stderr) &&
+                    /(--fork-session|--no-session-persistence)/.test(stderr);
+        const reason = old
+          ? "claude too old: needs >=2.1.117 (--fork-session unsupported)"
+          : `claude exited ${code}: ${tail}`;
+        broadcast("probe-failed", { agent, reason });
+        return reject(new Error(reason));
       }
       // Model-pin verification: parse the JSON envelope and confirm.
       try {

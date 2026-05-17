@@ -135,11 +135,13 @@ async function bindDashboardPort() {
         if (cleaned) return;
         cleaned = true;
         try {
-          fs2.unlinkSync(PID_FILE());
+          const ownerPid = parseInt(fs2.readFileSync(PID_FILE(), "utf8"), 10);
+          if (ownerPid === process.pid) fs2.unlinkSync(PID_FILE());
         } catch {
         }
         try {
-          fs2.unlinkSync(PORT_FILE());
+          const ownerPort = parseInt(fs2.readFileSync(PORT_FILE(), "utf8"), 10);
+          if (ownerPort === _state.port) fs2.unlinkSync(PORT_FILE());
         } catch {
         }
       };
@@ -152,6 +154,30 @@ async function bindDashboardPort() {
         process.exit(0);
       });
       process.once("exit", cleanup);
+      setInterval(() => {
+        let recordedPid = 0;
+        try {
+          recordedPid = parseInt(fs2.readFileSync(PID_FILE(), "utf8"), 10);
+        } catch {
+        }
+        if (!recordedPid) {
+          try {
+            fs2.writeFileSync(PID_FILE(), String(process.pid));
+          } catch {
+          }
+          try {
+            fs2.writeFileSync(PORT_FILE(), String(_state.port));
+          } catch {
+          }
+          return;
+        }
+        if (recordedPid !== process.pid) {
+          try {
+            process.kill(process.pid, "SIGTERM");
+          } catch {
+          }
+        }
+      }, 5e3).unref();
       return bindState();
     }
   }
@@ -15815,12 +15841,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs11, exportName) {
+    function addFormats(ajv, list, fs12, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs11[f]);
+        ajv.addFormat(f, fs12[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -16830,8 +16856,10 @@ async function startProbe(agent) {
       cleanup();
       if (code !== 0) {
         const tail = stderr.slice(-500) || stdout.slice(-500);
-        broadcast("probe-failed", { agent, reason: `claude exited ${code}: ${tail}` });
-        return reject(new Error(`claude exit ${code}: ${tail}`));
+        const old = /unknown option/i.test(stderr) && /(--fork-session|--no-session-persistence)/.test(stderr);
+        const reason = old ? "claude too old: needs >=2.1.117 (--fork-session unsupported)" : `claude exited ${code}: ${tail}`;
+        broadcast("probe-failed", { agent, reason });
+        return reject(new Error(reason));
       }
       try {
         const r = JSON.parse(stdout);
@@ -16969,6 +16997,7 @@ var init_doctor = __esm({
 
 // tools/src/swarmeq.mjs
 init_bind();
+import fs11 from "node:fs";
 import { spawn as spawn2 } from "node:child_process";
 import os2 from "node:os";
 
@@ -17159,6 +17188,7 @@ function ingest(req, res) {
 }
 
 // tools/src/swarmeq.mjs
+init_paths();
 var SUB = process.argv[2] || "";
 async function ensureBind() {
   await bindDashboardPort();
@@ -17188,6 +17218,17 @@ async function cmdDashboard() {
   openBrowser(url);
 }
 async function cmdDaemon() {
+  const active = await readActivePort();
+  if (!active) {
+    try {
+      fs11.unlinkSync(PORT_FILE());
+    } catch {
+    }
+    try {
+      fs11.unlinkSync(PID_FILE());
+    } catch {
+    }
+  }
   const s = await ensureBind();
   if (!s.bound) {
     return;

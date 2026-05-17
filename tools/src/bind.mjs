@@ -60,12 +60,37 @@ export async function bindDashboardPort() {
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
-        try { fs.unlinkSync(PID_FILE()); } catch {}
-        try { fs.unlinkSync(PORT_FILE()); } catch {}
+        // Only unlink if the files still point at us. If another daemon
+        // already took ownership (cold-start race winner), nuking its
+        // state would orphan it.
+        try {
+          const ownerPid = parseInt(fs.readFileSync(PID_FILE(), "utf8"), 10);
+          if (ownerPid === process.pid) fs.unlinkSync(PID_FILE());
+        } catch {}
+        try {
+          const ownerPort = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10);
+          if (ownerPort === _state.port) fs.unlinkSync(PORT_FILE());
+        } catch {}
       };
       process.once("SIGTERM", () => { cleanup(); process.exit(0); });
       process.once("SIGINT",  () => { cleanup(); process.exit(0); });
       process.once("exit", cleanup);
+      // Self-termination heartbeat: latest .pid writer is the canonical
+      // owner. Losers of a cold-start race notice within ~5s and yield.
+      // If .pid/.port go missing (e.g., a yielding daemon's cleanup raced
+      // ahead of ours), reclaim ownership by re-writing them.
+      setInterval(() => {
+        let recordedPid = 0;
+        try { recordedPid = parseInt(fs.readFileSync(PID_FILE(), "utf8"), 10); } catch {}
+        if (!recordedPid) {
+          try { fs.writeFileSync(PID_FILE(), String(process.pid)); } catch {}
+          try { fs.writeFileSync(PORT_FILE(), String(_state.port)); } catch {}
+          return;
+        }
+        if (recordedPid !== process.pid) {
+          try { process.kill(process.pid, "SIGTERM"); } catch {}
+        }
+      }, 5_000).unref();
       return bindState();
     }
   }

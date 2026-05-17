@@ -141,6 +141,11 @@
     color: var(--alarm);
   }
   .topbar .live.err .pip { background: var(--alarm); animation: none; opacity: 0.5; }
+  .topbar .live.err.actionable { cursor: pointer; }
+  .topbar .live.err.actionable:hover {
+    background: rgba(255, 92, 92, 0.14);
+    border-color: rgba(255, 92, 92, 0.35);
+  }
 
   /* ─── Team strip — all agents at a glance ────────────────────── */
   .team {
@@ -877,6 +882,10 @@ async function loadHistory() {
 function connectSSE() {
   const es = new EventSource("/events");
   es.addEventListener("open",  () => setLive("",    "live"));
+  // Native EventSource keeps retrying behind the scenes. We surface a
+  // "click to retry" affordance only after the disconnect has persisted
+  // long enough that the user might want to force a reload instead of
+  // waiting for backoff.
   es.addEventListener("error", () => setLive("err", "reconnecting"));
   es.addEventListener("report", e => {
     const r = JSON.parse(e.data);
@@ -918,10 +927,41 @@ function connectSSE() {
   });
 }
 
+let _staleTimer = null;
 function setLive(cls, txt) {
   const el = $("live");
+  // Native EventSource fires `error` on every failed reconnect attempt
+  // (~3s cadence). Capture err/actionable state BEFORE we overwrite
+  // className so we can preserve the actionable affordance once the
+  // 5s timer has fired, and so we don't reset that timer on every
+  // retry-error.
+  const wasErr = el.classList.contains("err");
+  const wasActionable = el.classList.contains("actionable");
   el.className = "live " + cls;
-  el.lastChild.textContent = " " + txt;
+
+  if (cls === "err") {
+    if (wasActionable) {
+      // Keep the affordance visible; don't clobber its label.
+      el.classList.add("actionable");
+    } else {
+      el.lastChild.textContent = " " + txt;
+    }
+    if (!wasErr) {
+      // First entry into err state — arm the 5s "click to retry" timer.
+      if (_staleTimer) clearTimeout(_staleTimer);
+      _staleTimer = setTimeout(() => {
+        el.classList.add("actionable");
+        el.lastChild.textContent = " reconnecting — click to retry";
+        el.title = "click to reload the dashboard";
+        el.onclick = () => location.reload();
+      }, 5000);
+    }
+  } else {
+    el.lastChild.textContent = " " + txt;
+    if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
+    el.removeAttribute("title");
+    el.onclick = null;
+  }
 }
 
 function updateChrome() {

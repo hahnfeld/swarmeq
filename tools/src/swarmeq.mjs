@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.mjs";
 import { attachRoutes } from "./http.mjs";
+import { PORT_FILE, PID_FILE } from "./paths.mjs";
 
 const SUB = process.argv[2] || "";
 
@@ -47,6 +49,17 @@ async function cmdDaemon() {
   // Internal subcommand — the long-lived background process that actually
   // binds the port and serves the dashboard. Spawned detached from
   // `cmdDashboard` and from the session-start hook.
+  //
+  // If a previous daemon died via SIGKILL or panic, the SIGTERM/exit
+  // cleanup in bind.mjs never ran and .port/.pid linger. The /healthz
+  // identity check in readActivePort() correctly rejects them, but the
+  // files themselves are still on disk; clear them up-front so the
+  // bind loop and any concurrent reader see a clean slate.
+  const active = await readActivePort();
+  if (!active) {
+    try { fs.unlinkSync(PORT_FILE()); } catch {}
+    try { fs.unlinkSync(PID_FILE()); } catch {}
+  }
   const s = await ensureBind();
   if (!s.bound) {
     // Lost the race — another daemon already owns the port. Just exit.

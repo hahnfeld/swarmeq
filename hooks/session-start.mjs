@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -6,6 +7,7 @@ import { spawn } from "node:child_process";
 const dir = path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
 const REG = path.join(dir, "registry.json");
+const PORT = path.join(dir, ".port");
 
 const sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "_";
 
@@ -13,16 +15,28 @@ const sanitize = (s) => String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0
 // them as separate agents and don't open another browser tab.
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
 
-// Detached-spawn `swarmeq dashboard`. If nothing's bound, it forks the
-// daemon and opens the browser. If something IS bound, it sees the active
-// port, opens the browser, and exits — `open <url>` is idempotent on macOS
-// (focuses the existing tab). Either way the user lands on the dashboard
-// the moment their session starts.
-function ensureDashboard() {
+async function portReachable(p) {
+  return new Promise((res) => {
+    const sock = net.createConnection({ host: "127.0.0.1", port: p });
+    sock.once("connect", () => { sock.end(); res(true); });
+    sock.once("error", () => res(false));
+    sock.setTimeout(500, () => { sock.destroy(); res(false); });
+  });
+}
+
+// Cold-start only: if the daemon is already running, do nothing — the user
+// already has the tab open (and reopening on every session restart spams
+// tabs on Linux/Windows, where `xdg-open` / `start ""` aren't idempotent).
+// When no daemon is detected, spawn `swarmeq dashboard`, which forks the
+// daemon and opens the browser to land the user on the dashboard.
+async function ensureDashboard() {
   const root = process.env.CLAUDE_PLUGIN_ROOT;
   if (!root) return;
   const script = path.join(root, "server", "swarmeq.mjs");
   if (!fs.existsSync(script)) return;
+  let port = 0;
+  try { port = parseInt(fs.readFileSync(PORT, "utf8"), 10); } catch {}
+  if (port && (await portReachable(port))) return;
   try {
     const child = spawn("node", [script, "dashboard"], {
       detached: true,
@@ -36,7 +50,7 @@ function ensureDashboard() {
 let body = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (c) => { body += c; });
-process.stdin.on("end", () => {
+process.stdin.on("end", async () => {
   try {
     const evt = body ? JSON.parse(body) : {};
     const sid = sanitize(evt.session_id || evt.sessionId || "unknown");
@@ -54,6 +68,6 @@ process.stdin.on("end", () => {
     fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
     fs.renameSync(tmp, REG);
   } catch { /* hooks never block */ }
-  ensureDashboard();
+  await ensureDashboard();
   process.exit(0);
 });
