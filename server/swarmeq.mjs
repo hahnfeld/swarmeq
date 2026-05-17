@@ -72,7 +72,7 @@ function dashboardFile() {
 function feelingsFile() {
   return path.join(pluginRoot(), "dashboard", "feelings.json");
 }
-var _root, PORT_FILE, PID_FILE, POLL_FILE, REGISTRY_FILE, AGENT_FILE;
+var _root, PORT_FILE, PID_FILE, POLL_FILE, REGISTRY_FILE, AGENT_FILE, SENTIMENT_FILE;
 var init_paths = __esm({
   "src/paths.mjs"() {
     _root = null;
@@ -81,6 +81,7 @@ var init_paths = __esm({
     POLL_FILE = () => path.join(stateDir(), ".poll");
     REGISTRY_FILE = () => path.join(stateDir(), "registry.json");
     AGENT_FILE = (agent) => path.join(stateDir(), `${sanitizeAgent(agent)}.json`);
+    SENTIMENT_FILE = () => path.join(stateDir(), "sentiment.jsonl");
   }
 });
 
@@ -337,8 +338,106 @@ var init_validate = __esm({
   }
 });
 
-// src/record.mjs
+// src/sentiment.mjs
 import fs4 from "node:fs";
+function labelToCore() {
+  if (_labelToCore) return _labelToCore;
+  const m = /* @__PURE__ */ new Map();
+  try {
+    const data = JSON.parse(fs4.readFileSync(feelingsFile(), "utf8"));
+    for (const c of data.cores || []) {
+      m.set(c.label, c.label);
+      for (const sub of c.subs || []) m.set(sub, c.label);
+    }
+  } catch {
+  }
+  _labelToCore = m;
+  return m;
+}
+function polarity(label) {
+  const core = labelToCore().get(label);
+  if (!core) return 0;
+  if (POSITIVE_CORES.has(core)) return 1;
+  if (NEGATIVE_CORES.has(core)) return -1;
+  return 0;
+}
+function computeSentiment(agents) {
+  let pos = 0, neg = 0;
+  const names = Object.keys(agents || {});
+  for (const name of names) {
+    const r = agents[name];
+    if (!r || !Array.isArray(r.feelings)) continue;
+    for (const f of r.feelings) {
+      const p = polarity(f.label);
+      if (p > 0) pos += Number(f.intensity) || 0;
+      else if (p < 0) neg += Number(f.intensity) || 0;
+    }
+  }
+  const denom = pos + neg;
+  return {
+    positive: pos,
+    negative: neg,
+    ratio: denom > 0 ? pos / denom : null,
+    agentCount: names.length
+  };
+}
+function appendSentimentPoint(point) {
+  const line = JSON.stringify(point) + "\n";
+  try {
+    fs4.appendFileSync(SENTIMENT_FILE(), line);
+  } catch {
+    return;
+  }
+  try {
+    const stat = fs4.statSync(SENTIMENT_FILE());
+    if (stat.size < HISTORY_CAP * 200) return;
+    const all = fs4.readFileSync(SENTIMENT_FILE(), "utf8").split("\n").filter(Boolean);
+    if (all.length <= HISTORY_CAP) return;
+    const trimmed = all.slice(-HISTORY_CAP).join("\n") + "\n";
+    fs4.writeFileSync(SENTIMENT_FILE() + ".tmp", trimmed);
+    fs4.renameSync(SENTIMENT_FILE() + ".tmp", SENTIMENT_FILE());
+  } catch {
+  }
+}
+function snapshotAndBroadcast(agents) {
+  const s = computeSentiment(agents);
+  const point = { ts: Date.now(), ratio: s.ratio, agentCount: s.agentCount };
+  appendSentimentPoint(point);
+  broadcast("sentiment", point);
+  return point;
+}
+function readSentimentHistory(limit = HISTORY_CAP) {
+  let lines = [];
+  try {
+    lines = fs4.readFileSync(SENTIMENT_FILE(), "utf8").split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+  const slice = lines.slice(Math.max(0, lines.length - limit));
+  const out = [];
+  for (const l of slice) {
+    try {
+      const p = JSON.parse(l);
+      if (Number.isFinite(p.ts)) out.push(p);
+    } catch {
+    }
+  }
+  return out;
+}
+var POSITIVE_CORES, NEGATIVE_CORES, HISTORY_CAP, _labelToCore;
+var init_sentiment = __esm({
+  "src/sentiment.mjs"() {
+    init_paths();
+    init_sse();
+    POSITIVE_CORES = /* @__PURE__ */ new Set(["joyful", "powerful", "peaceful"]);
+    NEGATIVE_CORES = /* @__PURE__ */ new Set(["mad", "sad", "scared"]);
+    HISTORY_CAP = 1e3;
+    _labelToCore = null;
+  }
+});
+
+// src/record.mjs
+import fs5 from "node:fs";
 import http2 from "node:http";
 import path2 from "node:path";
 async function record(raw) {
@@ -358,6 +457,7 @@ async function record(raw) {
   const state = bindState();
   if (state.bound) {
     broadcast("report", report);
+    snapshotAndBroadcast(readAllReports());
   } else {
     const port = state.port || readPortFile();
     if (port) forwardToDashboard(port, report).catch(() => {
@@ -367,7 +467,7 @@ async function record(raw) {
 }
 function readPortFile() {
   try {
-    const p = parseInt(fs4.readFileSync(PORT_FILE(), "utf8"), 10);
+    const p = parseInt(fs5.readFileSync(PORT_FILE(), "utf8"), 10);
     return Number.isFinite(p) ? p : null;
   } catch {
     return null;
@@ -396,10 +496,10 @@ function readAllReports() {
   const out = {};
   const dir = stateDir();
   try {
-    for (const f of fs4.readdirSync(dir)) {
+    for (const f of fs5.readdirSync(dir)) {
       if (!f.endsWith(".json") || f === "registry.json") continue;
       try {
-        const r = JSON.parse(fs4.readFileSync(path2.join(dir, f), "utf8"));
+        const r = JSON.parse(fs5.readFileSync(path2.join(dir, f), "utf8"));
         if (r && r.agent) out[r.agent] = r;
       } catch {
       }
@@ -414,6 +514,7 @@ var init_record = __esm({
     init_bind();
     init_sse();
     init_validate();
+    init_sentiment();
   }
 });
 
@@ -445,8 +546,8 @@ __export(probe_exports, {
   startProbeAll: () => startProbeAll
 });
 import { spawn } from "node:child_process";
-import fs5 from "node:fs";
-import path3 from "node:path";
+import fs7 from "node:fs";
+import path4 from "node:path";
 async function startProbe(agent) {
   const entry = lookupAgent(agent);
   if (!entry || !entry.session_id) {
@@ -460,7 +561,7 @@ async function startProbe(agent) {
     mcpServers: {
       swarmeq: {
         command: "node",
-        args: [path3.join(pluginRoot(), "server", "swarmeq.mjs"), "mcp"]
+        args: [path4.join(pluginRoot(), "server", "swarmeq.mjs"), "mcp"]
       }
     }
   });
@@ -546,7 +647,7 @@ async function startProbe(agent) {
 }
 function lookupAgent(agent) {
   try {
-    const reg = JSON.parse(fs5.readFileSync(REGISTRY_FILE(), "utf8"));
+    const reg = JSON.parse(fs7.readFileSync(REGISTRY_FILE(), "utf8"));
     return reg[agent] || null;
   } catch {
     return null;
@@ -555,7 +656,7 @@ function lookupAgent(agent) {
 function startProbeAll() {
   let reg = {};
   try {
-    reg = JSON.parse(fs5.readFileSync(REGISTRY_FILE(), "utf8"));
+    reg = JSON.parse(fs7.readFileSync(REGISTRY_FILE(), "utf8"));
   } catch {
   }
   const agents = Object.keys(reg);
@@ -819,10 +920,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1150,11 +1251,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -1371,16 +1472,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path5 = []) => {
+  const processError = (error3, path6 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12180,8 +12281,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path5) {
-      let input = path5;
+    function removeDotSegments(path6) {
+      let input = path6;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -12433,8 +12534,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path5, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
+        const [path6, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -15827,12 +15928,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs9, exportName) {
+    function addFormats(ajv, list, fs11, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs9[f]);
+        ajv.addFormat(f, fs11[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -16782,11 +16883,11 @@ __export(ops_exports, {
   configurePoll: () => configurePoll,
   stopServer: () => stopServer
 });
-import fs7 from "node:fs";
+import fs9 from "node:fs";
 async function configurePoll(arg) {
   if (!arg || arg === "off" || arg === "0") {
     try {
-      fs7.unlinkSync(POLL_FILE());
+      fs9.unlinkSync(POLL_FILE());
     } catch {
     }
     process.stdout.write("swarmeq poll: disabled\n");
@@ -16797,14 +16898,14 @@ async function configurePoll(arg) {
     process.stderr.write("swarmeq poll: interval must be 5-3600 (seconds), or 'off'\n");
     process.exit(2);
   }
-  fs7.writeFileSync(POLL_FILE(), JSON.stringify({ intervalSec: seconds, ts: Date.now() }));
+  fs9.writeFileSync(POLL_FILE(), JSON.stringify({ intervalSec: seconds, ts: Date.now() }));
   process.stdout.write(`swarmeq poll: every ${seconds}s on Stop hook
 `);
 }
 async function stopServer() {
   let pid = 0;
   try {
-    pid = parseInt(fs7.readFileSync(PID_FILE(), "utf8"), 10);
+    pid = parseInt(fs9.readFileSync(PID_FILE(), "utf8"), 10);
   } catch {
   }
   if (!pid) {
@@ -16833,7 +16934,7 @@ __export(doctor_exports, {
   runDoctor: () => runDoctor
 });
 import net2 from "node:net";
-import fs8 from "node:fs";
+import fs10 from "node:fs";
 import { execSync } from "node:child_process";
 function row(name, ok, hint = "") {
   const sym = ok ? "\u2713" : "\u2717";
@@ -16877,7 +16978,7 @@ async function runDoctor() {
   let writable = false;
   try {
     const d = stateDir();
-    fs8.accessSync(d, fs8.constants.W_OK);
+    fs10.accessSync(d, fs10.constants.W_OK);
     writable = true;
   } catch {
   }
@@ -16909,8 +17010,82 @@ init_paths();
 init_bind();
 init_sse();
 init_record();
+import fs8 from "node:fs";
+import path5 from "node:path";
+
+// src/sweep.mjs
+init_paths();
+init_sse();
+init_record();
+init_sentiment();
 import fs6 from "node:fs";
-import path4 from "node:path";
+import path3 from "node:path";
+var STALE_MS = 10 * 60 * 1e3;
+var SWEEP_INTERVAL_MS = 3e4;
+var sweepTimer = null;
+var lastSeen = /* @__PURE__ */ new Set();
+var primed = false;
+function readReportTs(file) {
+  try {
+    const r = JSON.parse(fs6.readFileSync(file, "utf8"));
+    const ts = Number(r?.ts);
+    return Number.isFinite(ts) ? ts : 0;
+  } catch {
+    return 0;
+  }
+}
+function sweepStaleAgents() {
+  const dir = stateDir();
+  let entries = [];
+  try {
+    entries = fs6.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const live = /* @__PURE__ */ new Set();
+  const removed = [];
+  for (const f of entries) {
+    if (!f.endsWith(".json") || f === "registry.json") continue;
+    const agent = f.slice(0, -5);
+    const fp = path3.join(dir, f);
+    const ts = readReportTs(fp);
+    if (ts > 0 && now - ts > STALE_MS) {
+      try {
+        fs6.unlinkSync(AGENT_FILE(agent));
+      } catch {
+      }
+      if (primed && lastSeen.has(agent)) {
+        broadcast("agent-removed", { agent, reason: "stale", ts: now });
+      }
+      removed.push(agent);
+      continue;
+    }
+    live.add(agent);
+  }
+  if (primed) {
+    for (const agent of lastSeen) {
+      if (!live.has(agent) && !removed.includes(agent)) {
+        broadcast("agent-removed", { agent, reason: "deregistered", ts: now });
+        removed.push(agent);
+      }
+    }
+  }
+  lastSeen.clear();
+  for (const a of live) lastSeen.add(a);
+  primed = true;
+  if (removed.length > 0) snapshotAndBroadcast(readAllReports());
+  return removed;
+}
+function startSweepTimer() {
+  if (sweepTimer) return;
+  sweepStaleAgents();
+  sweepTimer = setInterval(sweepStaleAgents, SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+}
+
+// src/http.mjs
+init_sentiment();
 var MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -16926,15 +17101,20 @@ function attachRoutes() {
   if (state.server._swarmeqAttached) return;
   state.server._swarmeqAttached = true;
   state.server.on("request", handle);
+  startSweepTimer();
 }
 async function handle(req, res) {
   try {
     const u = new URL(req.url, "http://127.0.0.1");
     const pn = u.pathname;
-    if (req.method === "GET" && (pn === "/" || pn === "/index.html")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
+    if (req.method === "GET" && (pn === "/" || pn === "/index.html" || pn === "/team")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
     if (req.method === "GET" && pn === "/feelings.json") return serveFile(res, feelingsFile(), "application/json");
     if (req.method === "GET" && pn === "/events") return addClient(req, res);
     if (req.method === "GET" && pn === "/state") return serveJSON(res, snapshot());
+    if (req.method === "GET" && pn === "/history") {
+      const lim = Math.max(1, Math.min(2e3, parseInt(u.searchParams.get("limit") || "500", 10) || 500));
+      return serveJSON(res, { points: readSentimentHistory(lim) });
+    }
     if (req.method === "POST" && pn === "/ingest") return ingest(req, res);
     if (req.method === "POST" && pn === "/probe") return probeAll(res);
     if (req.method === "POST" && pn.startsWith("/probe/")) {
@@ -16942,8 +17122,8 @@ async function handle(req, res) {
       return probe(res, agent);
     }
     if (req.method === "GET" && /^\/[a-zA-Z0-9._-]+\.(png|jpe?g|svg|webp|gif|ico)$/.test(pn)) {
-      const ext = path4.extname(pn).toLowerCase();
-      const file = path4.join(pluginRoot(), "dashboard", pn.slice(1));
+      const ext = path5.extname(pn).toLowerCase();
+      const file = path5.join(pluginRoot(), "dashboard", pn.slice(1));
       return serveFile(res, file, MIME[ext] || "application/octet-stream");
     }
     res.writeHead(404, { "Content-Type": "text/plain" });
@@ -16957,7 +17137,7 @@ async function handle(req, res) {
   }
 }
 function serveFile(res, file, contentType) {
-  fs6.readFile(file, (err, buf) => {
+  fs8.readFile(file, (err, buf) => {
     if (err) {
       res.writeHead(500, { "Content-Type": "text/plain" });
       res.end(`cannot read ${file}: ${err.message}
@@ -16976,10 +17156,11 @@ function serveJSON(res, data) {
 function snapshot() {
   let registry2 = {};
   try {
-    registry2 = JSON.parse(fs6.readFileSync(REGISTRY_FILE(), "utf8"));
+    registry2 = JSON.parse(fs8.readFileSync(REGISTRY_FILE(), "utf8"));
   } catch {
   }
-  return { agents: readAllReports(), registry: registry2, ts: Date.now() };
+  const agents = readAllReports();
+  return { agents, registry: registry2, sentiment: computeSentiment(agents), ts: Date.now() };
 }
 function ingest(req, res) {
   let body = "";

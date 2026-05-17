@@ -5,6 +5,7 @@ import { AGENT_FILE, PORT_FILE, stateDir, writeAtomic } from "./paths.mjs";
 import { bindState } from "./bind.mjs";
 import { broadcast } from "./sse.mjs";
 import { validateReport } from "./validate.mjs";
+import { snapshotAndBroadcast } from "./sentiment.mjs";
 
 // Single chokepoint: persist + broadcast (or forward to dashboard host).
 // Throws Error with code=EVALIDATE on schema failure.
@@ -25,6 +26,10 @@ export async function record(raw) {
   const state = bindState();
   if (state.bound) {
     broadcast("report", report);
+    // Only the bound process owns sentiment.jsonl. MCP children forward to
+    // /ingest, which calls record() again in the bound process — so we land
+    // in this branch exactly once per logical report.
+    snapshotAndBroadcast(readAllReports());
   } else {
     // Re-read .port each time so a long-lived MCP child finds the dashboard
     // whenever it appears (or moves), without needing to be restarted.
@@ -33,6 +38,7 @@ export async function record(raw) {
   }
   return report;
 }
+
 
 function readPortFile() {
   try {

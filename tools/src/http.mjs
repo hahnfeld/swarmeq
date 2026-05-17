@@ -11,6 +11,8 @@ const MIME = {
 import { bindState } from "./bind.mjs";
 import { addClient, broadcast } from "./sse.mjs";
 import { record, readAllReports } from "./record.mjs";
+import { startSweepTimer } from "./sweep.mjs";
+import { computeSentiment, readSentimentHistory } from "./sentiment.mjs";
 
 // Wire HTTP routes onto the bound server (if any). Idempotent on the same
 // server instance.
@@ -20,16 +22,24 @@ export function attachRoutes() {
   if (state.server._swarmeqAttached) return;
   state.server._swarmeqAttached = true;
   state.server.on("request", handle);
+  // The bound process is the canonical dashboard host — only it should
+  // run the stale-agent sweep so we don't have N MCP children racing on
+  // the same state directory.
+  startSweepTimer();
 }
 
 async function handle(req, res) {
   try {
     const u = new URL(req.url, "http://127.0.0.1");
     const pn = u.pathname;
-    if (req.method === "GET" && (pn === "/" || pn === "/index.html")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
+    if (req.method === "GET" && (pn === "/" || pn === "/index.html" || pn === "/team")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
     if (req.method === "GET" && pn === "/feelings.json")               return serveFile(res, feelingsFile(), "application/json");
     if (req.method === "GET" && pn === "/events")                      return addClient(req, res);
     if (req.method === "GET" && pn === "/state")                       return serveJSON(res, snapshot());
+    if (req.method === "GET" && pn === "/history") {
+      const lim = Math.max(1, Math.min(2000, parseInt(u.searchParams.get("limit") || "500", 10) || 500));
+      return serveJSON(res, { points: readSentimentHistory(lim) });
+    }
     if (req.method === "POST" && pn === "/ingest")                     return ingest(req, res);
     if (req.method === "POST" && pn === "/probe")                      return probeAll(res);
     if (req.method === "POST" && pn.startsWith("/probe/")) {
@@ -74,7 +84,8 @@ function serveJSON(res, data) {
 function snapshot() {
   let registry = {};
   try { registry = JSON.parse(fs.readFileSync(REGISTRY_FILE(), "utf8")); } catch {}
-  return { agents: readAllReports(), registry, ts: Date.now() };
+  const agents = readAllReports();
+  return { agents, registry, sentiment: computeSentiment(agents), ts: Date.now() };
 }
 
 function ingest(req, res) {
