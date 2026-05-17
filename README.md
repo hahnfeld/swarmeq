@@ -52,7 +52,7 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.3.0.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.3.1.zip
 # inside the session:
 /swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
@@ -64,7 +64,7 @@ git clone https://github.com/hahnfeld/swarmeq.git
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --plugin-dir ./swarmeq
 ```
 
-**Zero user-side npm install.** The MCP SDK is bundled into `server/swarmeq.mjs` at release time via esbuild. The dashboard is a single static HTML file with inline JS and inline SVG.
+**Zero user-side npm install.** The TypeScript sources under `tools/src/` are bundled with esbuild at release time into `server/swarmeq.mjs` (MCP SDK inlined) and four self-contained `hooks/*.mjs` artifacts. The dashboard is a single static HTML file with inline JS and inline SVG.
 
 ## Requirements
 
@@ -116,14 +116,17 @@ Source: Willcox, G. (1982). *The Feeling Wheel*. Transactional Analysis Journal,
 
 ## Building from source
 
-Maintainer-only. End users do not need this — `server/swarmeq.mjs` is committed pre-bundled.
+Maintainer-only. End users do not need this — `server/swarmeq.mjs` and `hooks/*.mjs` are committed pre-bundled.
 
 ```bash
-cd tools && npm install && node build.mjs
-# → produces server/swarmeq.mjs (~600 KB ESM bundle, MCP SDK inlined)
+(cd tools && npm install)
+node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
+(cd tools && npm run typecheck)       # optional: tsc --strict --noEmit
 ```
 
-## Status: 0.2.0
+Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
+
+## Status: 0.3.1
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 

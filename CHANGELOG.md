@@ -1,5 +1,13 @@
 # swarmeq changelog
 
+## 0.3.1 — plugin hooks.json shape fix
+
+### Fixed
+- `hooks/hooks.json` now wraps its event map under a top-level `"hooks"` key, matching the schema the Claude Code plugin loader expects. The 0.3.0 release shipped the events at the root (the standalone `.claude/hooks.json` shape), so `--plugin-url` installs of 0.3.0 failed at load time with `"hooks": expected record, received undefined`. `--plugin-dir` installs were unaffected only if the user happened to have a patched local copy.
+
+### Changed
+- Docs sync: README "Status" line now tracks the current version; "Building from source" snippet adds the `npm run typecheck` step and notes the sources are TypeScript with esbuild producing the committed `server/swarmeq.mjs` + `hooks/*.mjs` bundles. `docs/ARCHITECTURE.md` "Want to read the code?" section now points at `tools/src/*.ts` (and `tools/src/hooks/*.ts`) instead of the post-build `.mjs` paths. `.claude-plugin/marketplace.json` version field aligned with `plugin.json`.
+
 ## 0.3.0 — TypeScript + always-on daemon
 
 ### Changed (breaking)

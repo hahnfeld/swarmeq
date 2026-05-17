@@ -9,7 +9,7 @@
       "name": "swarmeq",
       "source": ".",
       "description": "Self-reported emotional state dashboard for Claude Code Agent Teams. Localhost-only, zero npm install, MIT.",
-      "version": "0.2.0",
+      "version": "0.3.1",
       "license": "MIT",
       "keywords": ["agent-teams", "dashboard", "introspection", "mcp", "observability"]
     }

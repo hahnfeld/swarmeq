@@ -64,4 +64,4 @@ All four hooks check `SWARMEQ_PROBE=1` and exit early when set, so probe forks d
 
 ## Want to read the code?
 
-The source lives in `tools/src/`. Start at `tools/src/swarmeq.mjs` (the CLI dispatcher) and follow the imports. `tools/src/bind.mjs` has the port/heartbeat logic, `tools/src/probe.mjs` has the fork mechanics, and `tools/src/http.mjs` has the routes. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the build loop.
+The source lives in `tools/src/` as TypeScript. Start at `tools/src/swarmeq.ts` (the CLI dispatcher) and follow the imports. `tools/src/bind.ts` has the port/heartbeat logic, `tools/src/probe.ts` has the fork mechanics, and `tools/src/http.ts` has the routes. The four hook entry points are under `tools/src/hooks/*.ts`. esbuild bundles each into the committed `server/swarmeq.mjs` / `hooks/*.mjs` artifacts — see [CONTRIBUTING.md](../CONTRIBUTING.md) for the build loop.
