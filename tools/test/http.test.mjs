@@ -25,13 +25,17 @@ test("GET /healthz returns identity envelope", async () => {
   });
 });
 
-test("GET /state returns {agents, registry, sentiment, ts}", async () => {
+test("GET /state returns {agents, installNeeded, registry, sentiment, ts}", async () => {
   await withTempState(async () => {
     await withHttpServer(handle, async ({ url }) => {
       const res = await httpRequest(`${url}/state`);
       assert.equal(res.status, 200);
       const obj = JSON.parse(res.body);
-      assert.deepEqual(Object.keys(obj).sort(), ["agents", "registry", "sentiment", "ts"]);
+      assert.deepEqual(
+        Object.keys(obj).sort(),
+        ["agents", "installNeeded", "registry", "sentiment", "ts"],
+      );
+      assert.equal(typeof obj.installNeeded, "boolean");
     });
   });
 });

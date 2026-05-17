@@ -1,5 +1,21 @@
 # swarmeq changelog
 
+## 0.4.1 — auto-install on SessionStart + install-needed banner
+
+### Added
+- **SessionStart auto-install.** The hook now silently writes `mcpServers.swarmeq` into `~/.claude/settings.json` on first run, so Agent Teams teammates pick it up on their next session without any manual command. Idempotent — subsequent SessionStarts are a single stat + JSON parse with no write. Emits a one-line stderr notice the one time it does the install (visible in Claude Code's startup output, so the user sees what changed). `/swarmeq-install` stays available for manual reinstall after `~/.claude/settings.json` wipes, but is no longer required for normal use.
+- **Install-needed banner on the dashboard.** `/state` now includes `installNeeded: boolean`. Dashboard shows a warning banner above the team view only when the user-scope settings.json lacks the swarmeq entry — covers the brief race window between plugin install and first SessionStart hook completion, and any edge case where auto-install can't write (read-only `$HOME`, etc.). The banner disappears the instant the install lands.
+
+### Changed
+- `tools/src/install.ts` (new): small dedicated module exporting `installNeeded()`, `canonicalMcpEntry()`, `userSettingsPath()`. Lets both the CLI (`tools/src/swarmeq.ts`) and the HTTP `/state` route (`tools/src/http.ts`) consume the same check without forming a circular import through swarmeq.ts ↔ http.ts.
+- `tools/src/hooks/session-start.ts` gains the inlined `autoInstall()`. Hooks stay zero-import at runtime; the canonical entry is duplicated from `install.ts` on purpose. Failure modes (non-object settings, malformed JSON, copy/write errors) all emit a stderr line and continue — the hook never blocks the session.
+- `dashboard/dashboard.html` gains a `#install-banner` element and CSS, toggled by `refreshState()` against `installNeeded`.
+
+### Tests
+- 6 new tests for `installNeeded()` in `tools/test/install.test.mjs` (missing file, missing key, malformed JSON, JSON array, present-with-canonical-shape, present-with-custom-shape).
+- 4 new tests for SessionStart auto-install in `tools/test/hook-session-start.test.mjs` (fresh write + stderr notice, idempotent no-op, merge with existing entries + backup, refuse malformed settings).
+- 110 tests pass on Node 22+.
+
 ## 0.4.0 — team-subagent MCP via `/swarmeq-install`
 
 ### Added

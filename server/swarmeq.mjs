@@ -907,10 +907,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1238,11 +1238,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -1459,16 +1459,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path7 = []) => {
+  const processError = (error3, path8 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12268,8 +12268,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path7) {
-      let input = path7;
+    function removeDotSegments(path8) {
+      let input = path8;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -12521,8 +12521,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path7, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
+        const [path8, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -15915,12 +15915,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs12, exportName) {
+    function addFormats(ajv, list, fs13, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs12[f]);
+        ajv.addFormat(f, fs13[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -16849,17 +16849,17 @@ __export(probe_exports, {
   startProbe: () => startProbe
 });
 import { spawn } from "node:child_process";
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import http3 from "node:http";
-import path5 from "node:path";
+import path6 from "node:path";
 function unmangleModel(s) {
   return s.replace(/_(1m|200k|400k)_$/i, "");
 }
 function rotateIfLarge(file) {
   try {
-    const stat = fs8.statSync(file);
+    const stat = fs9.statSync(file);
     if (stat.size < LOG_ROTATE_BYTES) return;
-    const all = fs8.readFileSync(file, "utf8");
+    const all = fs9.readFileSync(file, "utf8");
     const tail = all.slice(-LOG_KEEP_BYTES);
     const firstNl = tail.indexOf("\n");
     const trimmed = firstNl >= 0 ? tail.slice(firstNl + 1) : tail;
@@ -16872,7 +16872,7 @@ function logProbe(agent, event, data = {}) {
   const file = PROBE_LOG_FILE();
   rotateIfLarge(file);
   try {
-    fs8.appendFileSync(file, JSON.stringify(payload) + "\n");
+    fs9.appendFileSync(file, JSON.stringify(payload) + "\n");
   } catch {
   }
   broadcast(event, { agent, ...data });
@@ -16916,7 +16916,7 @@ async function startProbe(agent) {
     mcpServers: {
       swarmeq: {
         command: "node",
-        args: [path5.join(pluginRoot(), "server", "swarmeq.mjs"), "mcp"]
+        args: [path6.join(pluginRoot(), "server", "swarmeq.mjs"), "mcp"]
       }
     }
   });
@@ -16943,7 +16943,7 @@ async function startProbe(agent) {
   ];
   const BUF_CAP = 128 * 1024;
   const startedAt = Date.now();
-  const probeCwd = entry.cwd && fs8.existsSync(entry.cwd) ? entry.cwd : void 0;
+  const probeCwd = entry.cwd && fs9.existsSync(entry.cwd) ? entry.cwd : void 0;
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
     const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -17023,7 +17023,7 @@ async function startProbe(agent) {
 }
 function reportWrittenSince(agent, sinceMs) {
   try {
-    const stat = fs8.statSync(AGENT_FILE(agent));
+    const stat = fs9.statSync(AGENT_FILE(agent));
     return stat.mtimeMs >= sinceMs;
   } catch {
     return false;
@@ -17052,11 +17052,11 @@ var ops_exports = {};
 __export(ops_exports, {
   stopServer: () => stopServer
 });
-import fs9 from "node:fs";
+import fs10 from "node:fs";
 async function stopServer() {
   let pid = 0;
   try {
-    pid = parseInt(fs9.readFileSync(PID_FILE(), "utf8"), 10);
+    pid = parseInt(fs10.readFileSync(PID_FILE(), "utf8"), 10);
   } catch {
   }
   if (!pid) {
@@ -17085,7 +17085,7 @@ var doctor_exports = {};
 __export(doctor_exports, {
   runDoctor: () => runDoctor
 });
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import { execSync } from "node:child_process";
 function row(name, ok, hint = "") {
   const sym = ok ? "\u2713" : "\u2717";
@@ -17125,14 +17125,14 @@ async function runDoctor() {
   let writable = false;
   try {
     const d = stateDir();
-    fs10.accessSync(d, fs10.constants.W_OK);
+    fs11.accessSync(d, fs11.constants.W_OK);
     writable = true;
   } catch {
   }
   lines.push(row("state/ writable", writable, "check ~/.claude/plugins/swarmeq/state perms"));
   let runningPort = 0;
   try {
-    runningPort = parseInt(fs10.readFileSync(PORT_FILE(), "utf8"), 10);
+    runningPort = parseInt(fs11.readFileSync(PORT_FILE(), "utf8"), 10);
   } catch {
   }
   if (runningPort > 0) {
@@ -17177,10 +17177,10 @@ var init_doctor = __esm({
 
 // tools/src/swarmeq.ts
 init_bind();
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import { spawn as spawn2, spawnSync } from "node:child_process";
-import os2 from "node:os";
-import path6 from "node:path";
+import os3 from "node:os";
+import path7 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // tools/src/http.ts
@@ -17188,8 +17188,8 @@ init_paths();
 init_bind();
 init_sse();
 init_record();
-import fs7 from "node:fs";
-import path4 from "node:path";
+import fs8 from "node:fs";
+import path5 from "node:path";
 
 // tools/src/sweep.ts
 init_paths();
@@ -17264,6 +17264,41 @@ function startSweepTimer() {
 
 // tools/src/http.ts
 init_sentiment();
+
+// tools/src/install.ts
+import fs7 from "node:fs";
+import os2 from "node:os";
+import path4 from "node:path";
+function userSettingsPath() {
+  return path4.join(os2.homedir(), ".claude", "settings.json");
+}
+function installNeeded() {
+  const file = userSettingsPath();
+  let raw;
+  try {
+    raw = fs7.readFileSync(file, "utf8");
+  } catch {
+    return true;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return true;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return true;
+  const mcp = parsed.mcpServers;
+  if (!mcp || typeof mcp !== "object" || Array.isArray(mcp)) return true;
+  return !mcp.swarmeq;
+}
+function canonicalMcpEntry() {
+  return {
+    command: "node",
+    args: ["${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs", "mcp"]
+  };
+}
+
+// tools/src/http.ts
 var MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -17304,8 +17339,8 @@ async function handle(req, res) {
     if (req.method === "POST" && pn === "/ingest") return ingest(req, res);
     if (req.method === "POST" && pn === "/probe-event") return probeEvent(req, res);
     if (req.method === "GET" && /^\/[a-zA-Z0-9._-]+\.(png|jpe?g|svg|webp|gif|ico)$/.test(pn)) {
-      const ext = path4.extname(pn).toLowerCase();
-      const file = path4.join(pluginRoot(), "dashboard", pn.slice(1));
+      const ext = path5.extname(pn).toLowerCase();
+      const file = path5.join(pluginRoot(), "dashboard", pn.slice(1));
       return serveFile(res, file, MIME[ext] || "application/octet-stream");
     }
     res.writeHead(404, { "Content-Type": "text/plain" });
@@ -17319,7 +17354,7 @@ async function handle(req, res) {
   }
 }
 function serveFile(res, file, contentType) {
-  fs7.readFile(file, (err, buf) => {
+  fs8.readFile(file, (err, buf) => {
     if (err) {
       res.writeHead(500, { "Content-Type": "text/plain" });
       res.end(`cannot read ${file}: ${err.message}
@@ -17337,7 +17372,20 @@ function serveJSON(res, data) {
 }
 function snapshot() {
   const agents = readLivingReports();
-  return { agents, registry: readRegistry(), sentiment: computeSentiment(agents), ts: Date.now() };
+  return {
+    agents,
+    registry: readRegistry(),
+    sentiment: computeSentiment(agents),
+    installNeeded: installNeededSafe(),
+    ts: Date.now()
+  };
+}
+function installNeededSafe() {
+  try {
+    return installNeeded();
+  } catch {
+    return false;
+  }
 }
 function probeEvent(req, res) {
   let body = "";
@@ -17442,11 +17490,11 @@ async function cmdDaemon() {
   const active = await readActivePort();
   if (!active) {
     try {
-      fs11.unlinkSync(PORT_FILE());
+      fs12.unlinkSync(PORT_FILE());
     } catch {
     }
     try {
-      fs11.unlinkSync(PID_FILE());
+      fs12.unlinkSync(PID_FILE());
     } catch {
     }
   }
@@ -17480,7 +17528,7 @@ async function waitForPort(timeoutMs) {
   return null;
 }
 function openBrowser(url) {
-  const plat = os2.platform();
+  const plat = os3.platform();
   let cmd;
   let args;
   if (plat === "darwin") {
@@ -17507,15 +17555,6 @@ function openBrowser(url) {
 `);
   }
 }
-function canonicalMcpEntry() {
-  return {
-    command: "node",
-    args: ["${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs", "mcp"]
-  };
-}
-function userSettingsPath() {
-  return path6.join(os2.homedir(), ".claude", "settings.json");
-}
 function entriesEqual(a, b) {
   try {
     return JSON.stringify(a) === JSON.stringify(b);
@@ -17525,9 +17564,9 @@ function entriesEqual(a, b) {
 }
 async function cmdInstall() {
   const file = userSettingsPath();
-  const dir = path6.dirname(file);
+  const dir = path7.dirname(file);
   try {
-    fs11.mkdirSync(dir, { recursive: true });
+    fs12.mkdirSync(dir, { recursive: true });
   } catch (err) {
     process.stderr.write(`swarmeq install: cannot create ${dir}: ${err.message}
 `);
@@ -17535,11 +17574,11 @@ async function cmdInstall() {
   }
   let existed = false;
   let existing = {};
-  if (fs11.existsSync(file)) {
+  if (fs12.existsSync(file)) {
     existed = true;
     let raw;
     try {
-      raw = fs11.readFileSync(file, "utf8");
+      raw = fs12.readFileSync(file, "utf8");
     } catch (err) {
       process.stderr.write(`swarmeq install: cannot read ${file}: ${err.message}
 `);
@@ -17568,7 +17607,7 @@ async function cmdInstall() {
   if (existed) {
     const backup = `${file}.bak.${Date.now()}`;
     try {
-      fs11.copyFileSync(file, backup);
+      fs12.copyFileSync(file, backup);
       process.stdout.write(`swarmeq install: backup written to ${backup}
 `);
     } catch (err) {
@@ -17588,7 +17627,7 @@ async function cmdInstall() {
   process.stdout.write(`swarmeq install: wrote ${file}. Restart active Claude Code sessions to pick up the new MCP server.
 `);
 }
-var _internals2 = { cmdInstall, canonicalMcpEntry, userSettingsPath, entriesEqual };
+var _internals2 = { cmdInstall, entriesEqual };
 async function main() {
   switch (SUB) {
     case "mcp":
@@ -17627,7 +17666,7 @@ async function main() {
 function isEntryPoint() {
   if (!process.argv[1]) return false;
   try {
-    return fileURLToPath(import.meta.url) === fs11.realpathSync(process.argv[1]);
+    return fileURLToPath(import.meta.url) === fs12.realpathSync(process.argv[1]);
   } catch {
     return false;
   }

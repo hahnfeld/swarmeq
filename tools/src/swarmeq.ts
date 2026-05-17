@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.ts";
 import { attachRoutes } from "./http.ts";
 import { PORT_FILE, PID_FILE, writeAtomic } from "./paths.ts";
+import { canonicalMcpEntry, installNeeded, userSettingsPath } from "./install.ts";
 
 const SUB = process.argv[2] || "";
 
@@ -120,23 +121,6 @@ function openBrowser(url: string): void {
   }
 }
 
-// Canonical entry written into the user's settings.json. `${CLAUDE_PLUGIN_ROOT}`
-// is expanded by Claude Code's plugin loader the same way it is in plugin.json,
-// so the entry stays correct across plugin upgrades that change the unpacked
-// path. Keeping this in code (rather than reading from plugin.json) means the
-// installed entry is bit-identical across runs, which the idempotency check
-// below relies on.
-function canonicalMcpEntry(): { command: string; args: string[] } {
-  return {
-    command: "node",
-    args: ["${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs", "mcp"],
-  };
-}
-
-function userSettingsPath(): string {
-  return path.join(os.homedir(), ".claude", "settings.json");
-}
-
 interface Settings { mcpServers?: Record<string, unknown>; [k: string]: unknown }
 
 function entriesEqual(a: unknown, b: unknown): boolean {
@@ -206,7 +190,7 @@ async function cmdInstall() {
 }
 
 // Exported for tests.
-export const _internals = { cmdInstall, canonicalMcpEntry, userSettingsPath, entriesEqual };
+export const _internals = { cmdInstall, entriesEqual };
 
 async function main() {
   switch (SUB) {
