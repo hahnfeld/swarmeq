@@ -52,10 +52,15 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.3.7.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.4.0.zip
 # inside the session:
-/swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
+/swarmeq:swarmeq-install     # one-time: writes ~/.claude/settings.json
+/swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
+
+### Why `/swarmeq-install` is required for Agent Teams
+
+Claude Code Agent Teams rebuilds every team-subagent's tool catalog from the static `tools` list in its agent-type definition, and silently ignores `--mcp-config` passed at the CLI. The only documented way to make an MCP server available to teammates is the user-scope `~/.claude/settings.json` `mcpServers` block. `/swarmeq-install` writes exactly that block — idempotent, atomic, backs up the prior file. Run it once after first install; you won't need to run it again unless you wipe your settings. Without it, only the lead session reports state; teammates show up in the registry but their probes can't call the MCP tool.
 
 **From source** (for contributors):
 
@@ -126,7 +131,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.3.7
+## Status: 0.4.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 

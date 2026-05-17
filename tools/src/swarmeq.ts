@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.ts";
 import { attachRoutes } from "./http.ts";
-import { PORT_FILE, PID_FILE } from "./paths.ts";
+import { PORT_FILE, PID_FILE, writeAtomic } from "./paths.ts";
 
 const SUB = process.argv[2] || "";
 
@@ -118,10 +120,99 @@ function openBrowser(url: string): void {
   }
 }
 
+// Canonical entry written into the user's settings.json. `${CLAUDE_PLUGIN_ROOT}`
+// is expanded by Claude Code's plugin loader the same way it is in plugin.json,
+// so the entry stays correct across plugin upgrades that change the unpacked
+// path. Keeping this in code (rather than reading from plugin.json) means the
+// installed entry is bit-identical across runs, which the idempotency check
+// below relies on.
+function canonicalMcpEntry(): { command: string; args: string[] } {
+  return {
+    command: "node",
+    args: ["${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs", "mcp"],
+  };
+}
+
+function userSettingsPath(): string {
+  return path.join(os.homedir(), ".claude", "settings.json");
+}
+
+interface Settings { mcpServers?: Record<string, unknown>; [k: string]: unknown }
+
+function entriesEqual(a: unknown, b: unknown): boolean {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+// Install path: writes user-scope mcpServers.swarmeq so team-subagent
+// teammates pick up the swarmeq MCP server. Documented Claude Code rule:
+// teammates load skills/MCP servers from project + user settings, not from
+// agent-definition frontmatter. Plugin-manifest mcpServers alone is not
+// enough — the user-scope settings.json is the only documented escape
+// hatch from per-agent-type tool filtering.
+async function cmdInstall() {
+  const file = userSettingsPath();
+  const dir = path.dirname(file);
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch (err) {
+    process.stderr.write(`swarmeq install: cannot create ${dir}: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
+  let existed = false;
+  let existing: Settings = {};
+  if (fs.existsSync(file)) {
+    existed = true;
+    let raw: string;
+    try { raw = fs.readFileSync(file, "utf8"); }
+    catch (err) {
+      process.stderr.write(`swarmeq install: cannot read ${file}: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+    // Refuse to overwrite a malformed file — the user has handwritten
+    // content here we can't safely preserve, and clobbering it would
+    // destroy their work.
+    try { existing = JSON.parse(raw) as Settings; }
+    catch (err) {
+      process.stderr.write(`swarmeq install: cannot parse ${file} (${(err as Error).message}). Refusing to overwrite; please fix the file by hand and re-run.\n`);
+      process.exit(1);
+    }
+    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+      process.stderr.write(`swarmeq install: ${file} is not a JSON object. Refusing to overwrite.\n`);
+      process.exit(1);
+    }
+  }
+  const canonical = canonicalMcpEntry();
+  const currentMcp = (existing.mcpServers && typeof existing.mcpServers === "object")
+    ? existing.mcpServers as Record<string, unknown>
+    : {};
+  if (entriesEqual(currentMcp.swarmeq, canonical)) {
+    process.stdout.write(`swarmeq install: already installed at ${file}\n`);
+    return;
+  }
+  if (existed) {
+    const backup = `${file}.bak.${Date.now()}`;
+    try { fs.copyFileSync(file, backup); process.stdout.write(`swarmeq install: backup written to ${backup}\n`); }
+    catch (err) {
+      process.stderr.write(`swarmeq install: cannot back up ${file}: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+  const next: Settings = { ...existing, mcpServers: { ...currentMcp, swarmeq: canonical } };
+  try { writeAtomic(file, JSON.stringify(next, null, 2) + "\n"); }
+  catch (err) {
+    process.stderr.write(`swarmeq install: cannot write ${file}: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`swarmeq install: wrote ${file}. Restart active Claude Code sessions to pick up the new MCP server.\n`);
+}
+
+// Exported for tests.
+export const _internals = { cmdInstall, canonicalMcpEntry, userSettingsPath, entriesEqual };
+
 async function main() {
   switch (SUB) {
     case "mcp":       return cmdMcp();
     case "dashboard": return cmdDashboard();
+    case "install":   return cmdInstall();
     case "_daemon":   return cmdDaemon();
     case "probe": {
       // Internal: invoked by the Stop hook. Forks a Claude session that
@@ -140,12 +231,22 @@ async function main() {
     case "stop":      return (await import("./ops.ts")).stopServer();
     case "doctor":    return (await import("./doctor.ts")).runDoctor();
     default:
-      process.stderr.write("usage: swarmeq <mcp|dashboard|stop|doctor>\n");
+      process.stderr.write("usage: swarmeq <mcp|dashboard|install|stop|doctor>\n");
       process.exit(2);
   }
 }
 
-main().catch((err) => {
+// Only run as a CLI when this module is the process entry point. Tests
+// `import` swarmeq.ts to call _internals.cmdInstall directly; without
+// this guard the top-level main() would fire on every import and dump
+// the usage hint into the test output (or worse, mutate state).
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false;
+  try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]); }
+  catch { return false; }
+}
+
+if (isEntryPoint()) main().catch((err) => {
   process.stderr.write((err.stack || String(err)) + "\n");
   process.exit(1);
 });

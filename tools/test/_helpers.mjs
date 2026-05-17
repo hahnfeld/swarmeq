@@ -3,6 +3,29 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
+// Allocate a tmp dir, point HOME at it, run fn(dir). Used by tests that
+// exercise code touching `~/.claude/...` (e.g., cmdInstall reads/writes
+// $HOME/.claude/settings.json). Restores HOME on exit so subsequent tests
+// see the real one. We override HOME rather than os.homedir() because
+// path.join(os.homedir(), ...) on POSIX consults HOME first, which is the
+// hook the install path uses.
+export async function withTempHome(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "swarmeq-test-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE; // win32 fallback for os.homedir
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
+  try {
+    return await fn(dir);
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 // Allocate a tmp dir, point SWARMEQ_STATE_DIR at it, run the test body, then
 // scrub the env var and the directory. Test isolation: every test starts with
 // an empty state dir, and never touches ~/.claude/plugins/swarmeq/state.

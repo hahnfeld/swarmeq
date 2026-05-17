@@ -47,6 +47,18 @@ Four small mechanisms keep things working even when the world is messy:
 - **Seamless upgrades.** That same identity check also catches daemons left behind by an earlier plugin install: when the running daemon's `version` doesn't match this install's `plugin.json` version (or is missing, as in pre-0.3.3 builds), the probing process SIGTERMs the daemon, clears `.port`/`.pid`, and lets the next caller bind a fresh one. The user's open dashboard tab reconnects via SSE — no duplicate window. Plugin upgrades work end-to-end without any manual `swarmeq stop`. Identity is keyed on `version`, not `root`: Claude Code unpacks each session's plugins into a private `/tmp/claude-plugin-session-<hash>/` directory, so a team with N subagents has N distinct `CLAUDE_PLUGIN_ROOT` paths all pointing at the same install — root-based comparison (used through 0.3.5) made every subagent treat the daemon as foreign and SIGTERM it, producing a thrash loop that froze the dashboard.
 - **Heartbeat.** If two daemons race to start simultaneously (rare but possible), each runs a 5-second `setInterval` that reads `.pid`. Whichever wrote `.pid` last is the canonical owner; the loser notices the mismatch and SIGTERMs itself. Yields without zombies, never deletes the winner's files.
 
+## Team subagents and the catalog filter
+
+Claude Code Agent Teams rebuilds every team-subagent's tool catalog from the `tools` list declared in its agent-type definition (e.g. the `tools:` frontmatter in `.claude/agents/qa.md`). That rebuild silently ignores `--mcp-config` and `--strict-mcp-config` passed at the CLI — the catalog is whatever the type definition says it is, full stop. Adding `mcp__swarmeq__report` to every agent-type's `tools` list works but is the textbook PITA the user is trying to avoid.
+
+The documented escape hatch is user-scope `~/.claude/settings.json`. From the Claude Code docs:
+
+> "The `skills` and `mcpServers` frontmatter fields in a subagent definition are not applied when that definition runs as a teammate. Teammates load skills and MCP servers from your project and user settings, the same as a regular session."
+
+So MCP servers declared in `~/.claude/settings.json` `mcpServers` get loaded into every teammate's catalog. swarmeq's `/swarmeq-install` slash command (added in 0.4.0) writes exactly that block — idempotent, atomic, backs up the prior file. Without it the dashboard shows only the lead session; teammates register on `SessionStart` and probes fire, but `mcp__swarmeq__report` isn't in their catalog and the probe-fork model responds in prose ("the report tool is not in my toolset") instead of calling the tool. The diagnostic for that condition is `probe-no-report` in `state/probe.log`, with the model's prose response captured in `modelResult`.
+
+The plugin's `plugin.json` `mcpServers` declaration is still needed — it's what makes the tool available to the **lead** session and to standalone use. The user-scope `settings.json` block is additive: it covers the teammate case the plugin manifest can't reach.
+
 ## Hooks at a glance
 
 - **`SessionStart`** — register the teammate in `registry.json`; ensure the daemon is running; on cold start (no daemon yet), open the browser.

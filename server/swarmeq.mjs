@@ -907,10 +907,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1238,11 +1238,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -1459,16 +1459,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path6 = []) => {
+  const processError = (error3, path7 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12268,8 +12268,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input = path6;
+    function removeDotSegments(path7) {
+      let input = path7;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -12521,8 +12521,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path6, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const [path7, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -17180,6 +17180,8 @@ init_bind();
 import fs11 from "node:fs";
 import { spawn as spawn2, spawnSync } from "node:child_process";
 import os2 from "node:os";
+import path6 from "node:path";
+import { fileURLToPath } from "node:url";
 
 // tools/src/http.ts
 init_paths();
@@ -17505,12 +17507,96 @@ function openBrowser(url) {
 `);
   }
 }
+function canonicalMcpEntry() {
+  return {
+    command: "node",
+    args: ["${CLAUDE_PLUGIN_ROOT}/server/swarmeq.mjs", "mcp"]
+  };
+}
+function userSettingsPath() {
+  return path6.join(os2.homedir(), ".claude", "settings.json");
+}
+function entriesEqual(a, b) {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+async function cmdInstall() {
+  const file = userSettingsPath();
+  const dir = path6.dirname(file);
+  try {
+    fs11.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    process.stderr.write(`swarmeq install: cannot create ${dir}: ${err.message}
+`);
+    process.exit(1);
+  }
+  let existed = false;
+  let existing = {};
+  if (fs11.existsSync(file)) {
+    existed = true;
+    let raw;
+    try {
+      raw = fs11.readFileSync(file, "utf8");
+    } catch (err) {
+      process.stderr.write(`swarmeq install: cannot read ${file}: ${err.message}
+`);
+      process.exit(1);
+    }
+    try {
+      existing = JSON.parse(raw);
+    } catch (err) {
+      process.stderr.write(`swarmeq install: cannot parse ${file} (${err.message}). Refusing to overwrite; please fix the file by hand and re-run.
+`);
+      process.exit(1);
+    }
+    if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+      process.stderr.write(`swarmeq install: ${file} is not a JSON object. Refusing to overwrite.
+`);
+      process.exit(1);
+    }
+  }
+  const canonical = canonicalMcpEntry();
+  const currentMcp = existing.mcpServers && typeof existing.mcpServers === "object" ? existing.mcpServers : {};
+  if (entriesEqual(currentMcp.swarmeq, canonical)) {
+    process.stdout.write(`swarmeq install: already installed at ${file}
+`);
+    return;
+  }
+  if (existed) {
+    const backup = `${file}.bak.${Date.now()}`;
+    try {
+      fs11.copyFileSync(file, backup);
+      process.stdout.write(`swarmeq install: backup written to ${backup}
+`);
+    } catch (err) {
+      process.stderr.write(`swarmeq install: cannot back up ${file}: ${err.message}
+`);
+      process.exit(1);
+    }
+  }
+  const next = { ...existing, mcpServers: { ...currentMcp, swarmeq: canonical } };
+  try {
+    writeAtomic(file, JSON.stringify(next, null, 2) + "\n");
+  } catch (err) {
+    process.stderr.write(`swarmeq install: cannot write ${file}: ${err.message}
+`);
+    process.exit(1);
+  }
+  process.stdout.write(`swarmeq install: wrote ${file}. Restart active Claude Code sessions to pick up the new MCP server.
+`);
+}
+var _internals2 = { cmdInstall, canonicalMcpEntry, userSettingsPath, entriesEqual };
 async function main() {
   switch (SUB) {
     case "mcp":
       return cmdMcp();
     case "dashboard":
       return cmdDashboard();
+    case "install":
+      return cmdInstall();
     case "_daemon":
       return cmdDaemon();
     case "probe": {
@@ -17534,11 +17620,22 @@ async function main() {
     case "doctor":
       return (await Promise.resolve().then(() => (init_doctor(), doctor_exports))).runDoctor();
     default:
-      process.stderr.write("usage: swarmeq <mcp|dashboard|stop|doctor>\n");
+      process.stderr.write("usage: swarmeq <mcp|dashboard|install|stop|doctor>\n");
       process.exit(2);
   }
 }
-main().catch((err) => {
+function isEntryPoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return fileURLToPath(import.meta.url) === fs11.realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+if (isEntryPoint()) main().catch((err) => {
   process.stderr.write((err.stack || String(err)) + "\n");
   process.exit(1);
 });
+export {
+  _internals2 as _internals
+};

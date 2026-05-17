@@ -1,5 +1,20 @@
 # swarmeq changelog
 
+## 0.4.0 — team-subagent MCP via `/swarmeq-install`
+
+### Added
+- **`/swarmeq-install` slash command** (and underlying `node server/swarmeq.mjs install` CLI). Writes the swarmeq MCP server entry into user-scope `~/.claude/settings.json` `mcpServers`. Idempotent, atomic, backs up the prior file before mutating. Run it once after first install; from then on every Claude Code session — lead or Agent Teams teammate — loads `mcp__swarmeq__report` into its tool catalog and the probe path works end-to-end. The dashboard fills in for teammates the same way it does for the lead. This is the documented escape hatch from Agent Teams' per-agent-type tool filter — see `docs/ARCHITECTURE.md` for the why.
+
+### Fixed
+- The "team subagent fork-probe finds the session but the model has no `mcp__swarmeq__report` in catalog" failure mode, which v0.3.5–0.3.7 had narrowed down but not solved. Diagnosis from the new `modelResult` field in `probe-no-report` events: Agent Teams rebuilds each teammate's tool catalog from the static `tools` list in its agent-type definition and silently ignores `--mcp-config`/`--strict-mcp-config`. The fix routes around this entirely by registering swarmeq at user scope, which Claude Code's docs explicitly permit teammates to load from.
+
+### Changed
+- `tools/src/swarmeq.ts` gains a `cmdInstall()` and `"install"` subcommand. The top-level `main()` is now gated by an entry-point check (compares `import.meta.url` against `process.argv[1]`) so importing the module from tests doesn't fire the CLI dispatcher.
+- `tools/test/_helpers.mjs` gains `withTempHome(fn)` (mirrors `withTempState`) — sets `HOME`/`USERPROFILE` to a fresh tmpdir, restores on exit. Used by the install tests to keep them from touching real user settings.
+
+### Tests
+- 4 new install tests: fresh-create, merge-with-existing-mcpServers, idempotency, refuse-malformed. 100 tests total on Node 22+.
+
 ## 0.3.7 — `/swarmeq-dashboard` actually opens the browser again
 
 ### Fixed
