@@ -31,6 +31,7 @@ async function handle(req, res) {
     if (req.method === "GET" && pn === "/events")                      return addClient(req, res);
     if (req.method === "GET" && pn === "/state")                       return serveJSON(res, snapshot());
     if (req.method === "POST" && pn === "/ingest")                     return ingest(req, res);
+    if (req.method === "POST" && pn === "/probe")                      return probeAll(res);
     if (req.method === "POST" && pn.startsWith("/probe/")) {
       const agent = decodeURIComponent(pn.slice("/probe/".length));
       return probe(res, agent);
@@ -116,4 +117,18 @@ async function probe(res, agent) {
   } catch (err) {
     broadcast("probe-failed", { agent, reason: `probe module: ${err.message}` });
   }
+}
+
+async function probeAll(res) {
+  let agents = [];
+  try {
+    const { startProbeAll } = await import("./probe.mjs");
+    agents = startProbeAll();
+  } catch (err) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end(`probe-all failed: ${err.message}\n`);
+    return;
+  }
+  res.writeHead(202, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ accepted: true, agents }));
 }

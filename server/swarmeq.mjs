@@ -169,6 +169,14 @@ async function bindDashboardPort() {
   }
   return bindState();
 }
+async function discoverDashboard() {
+  if (_state.bound) return bindState();
+  const active = await readActivePort();
+  _state.bound = false;
+  _state.port = active || null;
+  _state.url = active ? `http://127.0.0.1:${active}` : null;
+  return bindState();
+}
 async function readActivePort() {
   let port = null;
   try {
@@ -276,9 +284,6 @@ function allowedLabels() {
     return _labels;
   }
 }
-function faceKeys() {
-  return FACE_KEYS.slice();
-}
 function num01(x) {
   return typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1;
 }
@@ -290,15 +295,6 @@ function validateReport(raw) {
     agent = raw.agent;
   } else {
     errs.push("agent must be a non-empty printable string (<=64 chars, no control characters)");
-  }
-  const face = {};
-  if (!raw.face || typeof raw.face !== "object") {
-    errs.push("face must be an object with 8 numeric keys");
-  } else {
-    for (const k of FACE_KEYS) {
-      if (!num01(raw.face[k])) errs.push(`face.${k} must be a number in [0,1]`);
-      else face[k] = raw.face[k];
-    }
   }
   const feelings = [];
   if (!Array.isArray(raw.feelings) || raw.feelings.length === 0 || raw.feelings.length > 6) {
@@ -330,22 +326,12 @@ function validateReport(raw) {
     else note = raw.note;
   }
   if (errs.length) return { ok: false, errs };
-  return { ok: true, report: { agent, face, feelings, note, ts: Date.now() } };
+  return { ok: true, report: { agent, feelings, note, ts: Date.now() } };
 }
-var FACE_KEYS, _labels, CTRL;
+var _labels, CTRL;
 var init_validate = __esm({
   "src/validate.mjs"() {
     init_paths();
-    FACE_KEYS = [
-      "brow_inner_up",
-      "brow_outer_down",
-      "eye_open",
-      "eye_squint",
-      "mouth_corner_up",
-      "mouth_corner_down",
-      "mouth_open",
-      "cheek_raise"
-    ];
     _labels = null;
     CTRL = /[\x00-\x1f\x7f]/;
   }
@@ -372,11 +358,20 @@ async function record(raw) {
   const state = bindState();
   if (state.bound) {
     broadcast("report", report);
-  } else if (state.port) {
-    forwardToDashboard(state.port, report).catch(() => {
+  } else {
+    const port = state.port || readPortFile();
+    if (port) forwardToDashboard(port, report).catch(() => {
     });
   }
   return report;
+}
+function readPortFile() {
+  try {
+    const p = parseInt(fs4.readFileSync(PORT_FILE(), "utf8"), 10);
+    return Number.isFinite(p) ? p : null;
+  } catch {
+    return null;
+  }
 }
 function forwardToDashboard(port, report) {
   return new Promise((resolve, reject) => {
@@ -425,13 +420,11 @@ var init_record = __esm({
 // src/prompt.mjs
 function introspectionPrompt(agentName) {
   const labels = Array.from(allowedLabels()).join(", ");
-  const keys = faceKeys().join(", ");
   return `You are reporting your CURRENT functional state to a debugging dashboard.
 This is observability tooling, not roleplay or performance.
 
 Call the \`report\` MCP tool exactly once with:
 - agent: ${JSON.stringify(agentName)}
-- face: 8 normalised values in [0,1] for ${keys}
 - feelings: 1-4 labels from the Willcox wheel, each with intensity in [0,1],
   ordered by salience
 - note: one sentence on what is driving this state (<=200 chars)
@@ -448,7 +441,8 @@ var init_prompt = __esm({
 // src/probe.mjs
 var probe_exports = {};
 __export(probe_exports, {
-  startProbe: () => startProbe
+  startProbe: () => startProbe,
+  startProbeAll: () => startProbeAll
 });
 import { spawn } from "node:child_process";
 import fs5 from "node:fs";
@@ -557,6 +551,19 @@ function lookupAgent(agent) {
   } catch {
     return null;
   }
+}
+function startProbeAll() {
+  let reg = {};
+  try {
+    reg = JSON.parse(fs5.readFileSync(REGISTRY_FILE(), "utf8"));
+  } catch {
+  }
+  const agents = Object.keys(reg);
+  for (const agent of agents) {
+    startProbe(agent).catch(() => {
+    });
+  }
+  return agents;
 }
 var PROBE_TIMEOUT_MS;
 var init_probe = __esm({
@@ -16691,26 +16698,17 @@ var init_mcp = __esm({
     init_validate();
     TOOL = {
       name: "report",
-      description: "Report current functional state (8 facial actions + 1-4 Willcox feelings + optional note) to the swarmeq dashboard.",
+      description: "Report current functional state (1-4 Willcox feelings + optional note) to the swarmeq dashboard.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["agent", "face", "feelings"],
+        required: ["agent", "feelings"],
         properties: {
           agent: {
             type: "string",
             minLength: 1,
             maxLength: 64,
             description: "Stable identifier for this agent (Claude Code session_id or agent name)."
-          },
-          face: {
-            type: "object",
-            additionalProperties: false,
-            required: faceKeys(),
-            properties: Object.fromEntries(faceKeys().map((k) => [
-              k,
-              { type: "number", minimum: 0, maximum: 1 }
-            ]))
           },
           feelings: {
             type: "array",
@@ -16938,6 +16936,7 @@ async function handle(req, res) {
     if (req.method === "GET" && pn === "/events") return addClient(req, res);
     if (req.method === "GET" && pn === "/state") return serveJSON(res, snapshot());
     if (req.method === "POST" && pn === "/ingest") return ingest(req, res);
+    if (req.method === "POST" && pn === "/probe") return probeAll(res);
     if (req.method === "POST" && pn.startsWith("/probe/")) {
       const agent = decodeURIComponent(pn.slice("/probe/".length));
       return probe(res, agent);
@@ -17025,6 +17024,20 @@ async function probe(res, agent) {
     broadcast("probe-failed", { agent, reason: `probe module: ${err.message}` });
   }
 }
+async function probeAll(res) {
+  let agents = [];
+  try {
+    const { startProbeAll: startProbeAll2 } = await Promise.resolve().then(() => (init_probe(), probe_exports));
+    agents = startProbeAll2();
+  } catch (err) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end(`probe-all failed: ${err.message}
+`);
+    return;
+  }
+  res.writeHead(202, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ accepted: true, agents }));
+}
 
 // src/swarmeq.mjs
 var SUB = process.argv[2] || "";
@@ -17034,7 +17047,7 @@ async function ensureBind() {
   return bindState();
 }
 async function cmdMcp() {
-  await ensureBind();
+  await discoverDashboard();
   const { startMcp: startMcp2 } = await Promise.resolve().then(() => (init_mcp(), mcp_exports));
   await startMcp2();
 }
@@ -17096,6 +17109,14 @@ async function main() {
       const { startProbe: startProbe2 } = await Promise.resolve().then(() => (init_probe(), probe_exports));
       return startProbe2(agent);
     }
+    case "probe-all": {
+      await discoverDashboard();
+      const { startProbeAll: startProbeAll2 } = await Promise.resolve().then(() => (init_probe(), probe_exports));
+      const agents = startProbeAll2();
+      process.stdout.write(`swarmeq probe-all: dispatched ${agents.length} agent${agents.length === 1 ? "" : "s"}${agents.length ? " (" + agents.join(", ") + ")" : ""}
+`);
+      return;
+    }
     case "poll":
       return (await Promise.resolve().then(() => (init_ops(), ops_exports))).configurePoll(process.argv[3]);
     case "stop":
@@ -17103,7 +17124,7 @@ async function main() {
     case "doctor":
       return (await Promise.resolve().then(() => (init_doctor(), doctor_exports))).runDoctor();
     default:
-      process.stderr.write("usage: swarmeq <mcp|dashboard|check|probe|poll|stop|doctor>\n");
+      process.stderr.write("usage: swarmeq <mcp|dashboard|check|probe|probe-all|poll|stop|doctor>\n");
       process.exit(2);
   }
 }

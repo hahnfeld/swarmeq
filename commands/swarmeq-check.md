@@ -8,8 +8,7 @@ This is observability tooling, not roleplay or performance.
 
 Call the `mcp__swarmeq__report` tool exactly once with:
 
-- **agent**: your stable identifier — use `${CLAUDE_AGENT_NAME}` if set, otherwise `${CLAUDE_SESSION_ID}`, otherwise pick a short slug.
-- **face**: 8 normalised values in [0,1] for `brow_inner_up`, `brow_outer_down`, `eye_open`, `eye_squint`, `mouth_corner_up`, `mouth_corner_down`, `mouth_open`, `cheek_raise`.
+- **agent**: your stable identifier — use `${CLAUDE_AGENT_NAME}` if set, otherwise the literal string `lead`. Never report your session UUID as the agent.
 - **feelings**: 1–4 labels from the Willcox wheel, each with intensity in [0,1], ordered by salience.
 - **note**: one sentence on what is driving this state (≤200 chars).
 

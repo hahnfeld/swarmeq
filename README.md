@@ -2,7 +2,7 @@
 
 **A self-reported emotional state dashboard for Claude Code Agent Teams.**
 
-Each peer-agent reports its current functional state — eight facial-action values plus 1–4 Willcox 1982 feelings with intensities — and the dashboard renders one tab per agent: a stylized SVG face plus the full Willcox wheel with intensity highlights. Clicking a tab fork-probes the agent without disturbing its running session.
+Each peer-agent reports its current functional state — 1–4 Willcox 1982 feelings with intensities — and the dashboard renders one tab per agent: a stylized SVG face (derived from the dominant feeling) plus the full Willcox wheel with intensity highlights. Clicking a tab fork-probes the agent without disturbing its running session.
 
 ![dashboard preview](tools/scratch/screenshot-01.png)
 
@@ -53,7 +53,7 @@ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --plugin-dir ./swarmeq
 
 When Claude Code starts a session, it spawns `node server/swarmeq.mjs mcp` as the plugin's MCP server. Every such process attempts to bind port 7777 — the **first binder** owns the dashboard HTTP+SSE channel. Subsequent processes run MCP-only and forward any tool calls to the binder's `/ingest` endpoint, so reports appear in the browser whether they originated in the binder's process or any other.
 
-The `mcp__swarmeq__report` tool accepts a strict schema: 8 named facial-action values in [0,1], 1–4 feelings whose labels must come from the curated 78-entry Willcox 1982 set, and an optional ≤200-char note.
+The `mcp__swarmeq__report` tool accepts a strict schema: 1–4 feelings whose labels must come from the curated 78-entry Willcox 1982 set, each with an intensity in [0,1], plus an optional ≤200-char note.
 
 Clicking a tab POSTs to `/probe/:agent`, which spawns:
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { AGENT_FILE, stateDir, writeAtomic } from "./paths.mjs";
+import { AGENT_FILE, PORT_FILE, stateDir, writeAtomic } from "./paths.mjs";
 import { bindState } from "./bind.mjs";
 import { broadcast } from "./sse.mjs";
 import { validateReport } from "./validate.mjs";
@@ -25,10 +25,22 @@ export async function record(raw) {
   const state = bindState();
   if (state.bound) {
     broadcast("report", report);
-  } else if (state.port) {
-    forwardToDashboard(state.port, report).catch(() => {});
+  } else {
+    // Re-read .port each time so a long-lived MCP child finds the dashboard
+    // whenever it appears (or moves), without needing to be restarted.
+    const port = state.port || readPortFile();
+    if (port) forwardToDashboard(port, report).catch(() => {});
   }
   return report;
+}
+
+function readPortFile() {
+  try {
+    const p = parseInt(fs.readFileSync(PORT_FILE(), "utf8"), 10);
+    return Number.isFinite(p) ? p : null;
+  } catch {
+    return null;
+  }
 }
 
 function forwardToDashboard(port, report) {

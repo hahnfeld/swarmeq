@@ -1,13 +1,6 @@
 import fs from "node:fs";
 import { feelingsFile } from "./paths.mjs";
 
-const FACE_KEYS = [
-  "brow_inner_up", "brow_outer_down",
-  "eye_open", "eye_squint",
-  "mouth_corner_up", "mouth_corner_down",
-  "mouth_open", "cheek_raise",
-];
-
 let _labels = null;
 export function allowedLabels() {
   if (_labels) return _labels;
@@ -30,8 +23,6 @@ export function allowedLabels() {
   }
 }
 
-export function faceKeys() { return FACE_KEYS.slice(); }
-
 function num01(x) { return typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1; }
 const CTRL = /[\x00-\x1f\x7f]/;
 
@@ -44,16 +35,6 @@ export function validateReport(raw) {
     agent = raw.agent;
   } else {
     errs.push("agent must be a non-empty printable string (<=64 chars, no control characters)");
-  }
-
-  const face = {};
-  if (!raw.face || typeof raw.face !== "object") {
-    errs.push("face must be an object with 8 numeric keys");
-  } else {
-    for (const k of FACE_KEYS) {
-      if (!num01(raw.face[k])) errs.push(`face.${k} must be a number in [0,1]`);
-      else face[k] = raw.face[k];
-    }
   }
 
   const feelings = [];
@@ -85,5 +66,5 @@ export function validateReport(raw) {
   }
 
   if (errs.length) return { ok: false, errs };
-  return { ok: true, report: { agent, face, feelings, note, ts: Date.now() } };
+  return { ok: true, report: { agent, feelings, note, ts: Date.now() } };
 }

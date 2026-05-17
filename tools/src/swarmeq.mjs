@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
-import { bindDashboardPort, bindState, readActivePort } from "./bind.mjs";
+import { bindDashboardPort, bindState, discoverDashboard, readActivePort } from "./bind.mjs";
 import { attachRoutes } from "./http.mjs";
 
 const SUB = process.argv[2] || "";
@@ -12,7 +12,10 @@ async function ensureBind() {
 }
 
 async function cmdMcp() {
-  await ensureBind();
+  // Discover the dashboard, never bind one. If we bound 7778 here every
+  // Claude Code session would silently spin up its own private dashboard
+  // and SSE-broadcast reports into a void the real dashboard isn't reading.
+  await discoverDashboard();
   const { startMcp } = await import("./mcp.mjs");
   await startMcp();
   // startMcp() awaits connect() and returns; the stdio transport keeps the
@@ -64,11 +67,20 @@ async function main() {
       const { startProbe } = await import("./probe.mjs");
       return startProbe(agent);
     }
+    case "probe-all": {
+      // Discover the dashboard so probe-failed broadcasts have a listener,
+      // mirroring how cmdMcp avoids binding its own port.
+      await discoverDashboard();
+      const { startProbeAll } = await import("./probe.mjs");
+      const agents = startProbeAll();
+      process.stdout.write(`swarmeq probe-all: dispatched ${agents.length} agent${agents.length === 1 ? "" : "s"}${agents.length ? " (" + agents.join(", ") + ")" : ""}\n`);
+      return;
+    }
     case "poll":      return (await import("./ops.mjs")).configurePoll(process.argv[3]);
     case "stop":      return (await import("./ops.mjs")).stopServer();
     case "doctor":    return (await import("./doctor.mjs")).runDoctor();
     default:
-      process.stderr.write("usage: swarmeq <mcp|dashboard|check|probe|poll|stop|doctor>\n");
+      process.stderr.write("usage: swarmeq <mcp|dashboard|check|probe|probe-all|poll|stop|doctor>\n");
       process.exit(2);
   }
 }

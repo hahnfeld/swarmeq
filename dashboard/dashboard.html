@@ -89,8 +89,30 @@
     color: var(--text-3); letter-spacing: 0.01em;
   }
   .topbar .crumb b { color: var(--text-2); font-weight: 500; }
-  .topbar .live {
+  .topbar .probe-all {
     margin-left: auto;
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--text-2); cursor: pointer;
+    text-transform: lowercase; letter-spacing: 0.06em;
+    transition: all 220ms ease;
+  }
+  .topbar .probe-all:hover:not([disabled]) { background: var(--bg-1); color: var(--text); border-color: var(--text-3); }
+  .topbar .probe-all[disabled] { cursor: progress; opacity: 0.6; }
+  .topbar .probe-all.probing {
+    border-color: rgba(94, 231, 161, 0.35);
+    color: var(--accent);
+  }
+  .topbar .probe-all .count {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-4);
+  }
+  .topbar .probe-all:hover:not([disabled]) .count { color: var(--text-3); }
+  .topbar .live {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 4px 10px 4px 8px;
     border-radius: 999px;
@@ -425,6 +447,39 @@
     transition: color 220ms ease, background 220ms ease;
   }
   .actions button.probe:hover .age { color: var(--text-3); background: var(--bg-2); }
+  .actions button.probe[disabled] { cursor: progress; opacity: 0.7; }
+  .actions button.probe.probing {
+    border-color: rgba(94, 231, 161, 0.35);
+    color: var(--accent);
+  }
+  .actions button.probe.probing .age {
+    color: var(--accent);
+    background: rgba(94, 231, 161, 0.08);
+  }
+  .actions button.probe.failed {
+    border-color: rgba(255, 92, 92, 0.35);
+    color: var(--alarm);
+  }
+  .actions .probe-reason {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--alarm); letter-spacing: 0.02em;
+    max-width: 42ch; line-height: 1.4;
+    margin: 0;
+  }
+  .actions .probe-reason[hidden] { display: none; }
+  .agent.probing .glyph { animation: glyph-pulse 1.2s var(--ease) infinite; }
+  @keyframes glyph-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1.00; }
+  }
+  .agent.stale { opacity: 0.55; }
+  .agent.stale::after {
+    content: "stale"; margin-left: auto;
+    font-family: var(--mono); font-size: 9.5px;
+    color: var(--alarm); letter-spacing: 0.08em;
+    text-transform: lowercase;
+  }
+  .agent.stale .meter, .agent.stale .pct { display: none; }
 
   /* ─── Responsive ─────────────────────────────────────────────── */
   @media (max-width: 980px) {
@@ -485,6 +540,10 @@
   <div class="topbar">
     <a class="brand" href="/" aria-label="swarmeq"><span class="swarm">swarm</span><span class="eq">eq</span></a>
     <span class="crumb" id="crumb">— · agents reporting</span>
+    <button id="probe-all-btn" type="button" class="probe-all" hidden>
+      <span>probe all</span>
+      <span class="count" id="probe-all-count">—</span>
+    </button>
     <span id="live" class="live"><span class="pip"></span>connecting</span>
   </div>
 
@@ -527,9 +586,10 @@
 
       <div class="actions">
         <button id="probe-btn" type="button" class="probe">
-          <span>re-probe</span>
+          <span id="probe-label">re-probe</span>
           <span class="age" id="m-age">—</span>
         </button>
+        <p id="probe-reason" class="probe-reason" hidden></p>
       </div>
     </div>
   </section>
@@ -635,6 +695,7 @@ const store = {
   active: null,
   probing: new Set(),
   stale: new Set(),
+  failures: new Map(), // agent -> last probe-failed reason
   arcByLabel: new Map(),
 };
 const $ = id => document.getElementById(id);
@@ -648,6 +709,9 @@ async function init() {
   await refreshState();
   connectSSE();
   $("probe-btn").addEventListener("click", probeActive);
+  $("probe-all-btn").addEventListener("click", probeAll);
+  // Keep the "Xs ago" label honest without re-rendering the whole portrait.
+  setInterval(tickAge, 1000);
 }
 
 function patchColors() {
@@ -693,6 +757,7 @@ function connectSSE() {
     store.agents[r.agent] = r;
     store.probing.delete(r.agent);
     store.stale.delete(r.agent);
+    store.failures.delete(r.agent);
     renderTeam();
     if (!store.active) setActive(r.agent);
     else if (store.active === r.agent) renderActive();
@@ -702,7 +767,9 @@ function connectSSE() {
     const d = JSON.parse(e.data);
     store.probing.delete(d.agent);
     store.stale.add(d.agent);
+    store.failures.set(d.agent, d.reason || "probe failed");
     renderTeam();
+    if (store.active === d.agent) renderProbeState();
   });
 }
 
@@ -724,6 +791,12 @@ function updateChrome() {
   $("empty").hidden = !!n;
   $("stage").hidden = !n;
   $("team").hidden = !n;
+  // probe-all only makes sense once we know about registered agents.
+  const reg = Object.keys(store.registry || {}).length;
+  const btn = $("probe-all-btn");
+  const countEl = $("probe-all-count");
+  btn.hidden = reg === 0;
+  countEl.textContent = String(reg);
 }
 
 function countStuck() {
@@ -842,11 +915,9 @@ function renderActive() {
   // Wheel-center emoji
   $("wheel-emoji").innerHTML = faceSvg(dom ? dom.label.toLowerCase() : "peaceful");
 
-  // Age (folded into the re-probe button)
-  const ageSec = Math.max(0, Math.round((Date.now() - r.ts) / 1000));
-  $("m-age").textContent = ageSec < 60 ? `${ageSec}s ago`
-    : ageSec < 3600 ? `${Math.round(ageSec/60)}m ago`
-    : `${Math.round(ageSec/3600)}h ago`;
+  // Age (folded into the re-probe button) + probe button state
+  $("m-age").textContent = ageLabel(r.ts);
+  renderProbeState();
 }
 
 function arcPath(innerR, outerR, a0, a1) {
@@ -939,16 +1010,87 @@ function coreForLabel(label) {
 
 async function probeActive() {
   if (!store.active) return;
-  store.probing.add(store.active);
-  store.stale.delete(store.active);
+  const agent = store.active;
+  store.probing.add(agent);
+  store.stale.delete(agent);
+  store.failures.delete(agent);
   renderTeam();
+  renderProbeState();
   try {
-    await fetch("/probe/" + encodeURIComponent(store.active), { method: "POST" });
-  } catch {
-    store.probing.delete(store.active);
-    store.stale.add(store.active);
+    const res = await fetch("/probe/" + encodeURIComponent(agent), { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    store.probing.delete(agent);
+    store.stale.add(agent);
+    store.failures.set(agent, `request failed: ${err.message || err}`);
     renderTeam();
+    if (store.active === agent) renderProbeState();
   }
+}
+
+async function probeAll() {
+  const agents = Object.keys(store.registry || {});
+  if (agents.length === 0) return;
+  for (const a of agents) {
+    store.probing.add(a);
+    store.stale.delete(a);
+    store.failures.delete(a);
+  }
+  const btn = $("probe-all-btn");
+  btn.classList.add("probing");
+  btn.disabled = true;
+  renderTeam();
+  if (store.active) renderProbeState();
+  try {
+    const res = await fetch("/probe", { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    for (const a of agents) {
+      store.probing.delete(a);
+      store.failures.set(a, `probe-all request failed: ${err.message || err}`);
+    }
+    renderTeam();
+    if (store.active) renderProbeState();
+  } finally {
+    // Per-agent broadcasts (report or probe-failed) will clear the probing
+    // class one by one; release the button immediately so the user isn't
+    // locked out waiting on the slowest agent.
+    btn.classList.remove("probing");
+    btn.disabled = false;
+  }
+}
+
+function renderProbeState() {
+  const btn = $("probe-btn");
+  const label = $("probe-label");
+  const reason = $("probe-reason");
+  const isProbing = store.active && store.probing.has(store.active);
+  const failure = store.active ? store.failures.get(store.active) : null;
+  btn.classList.toggle("probing", !!isProbing);
+  btn.classList.toggle("failed", !!failure && !isProbing);
+  btn.disabled = !!isProbing;
+  label.textContent = isProbing ? "probing…" : (failure ? "re-probe" : "re-probe");
+  if (failure && !isProbing) {
+    reason.hidden = false;
+    reason.textContent = failure;
+  } else {
+    reason.hidden = true;
+    reason.textContent = "";
+  }
+}
+
+function tickAge() {
+  if (!store.active) return;
+  const r = store.agents[store.active];
+  if (!r) return;
+  $("m-age").textContent = ageLabel(r.ts);
+}
+
+function ageLabel(ts) {
+  const ageSec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return ageSec < 60 ? `${ageSec}s ago`
+    : ageSec < 3600 ? `${Math.round(ageSec/60)}m ago`
+    : `${Math.round(ageSec/3600)}h ago`;
 }
 
 init();

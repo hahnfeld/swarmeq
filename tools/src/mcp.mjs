@@ -2,25 +2,18 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { record } from "./record.mjs";
-import { faceKeys, allowedLabels } from "./validate.mjs";
+import { allowedLabels } from "./validate.mjs";
 
 const TOOL = {
   name: "report",
-  description: "Report current functional state (8 facial actions + 1-4 Willcox feelings + optional note) to the swarmeq dashboard.",
+  description: "Report current functional state (1-4 Willcox feelings + optional note) to the swarmeq dashboard.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
-    required: ["agent", "face", "feelings"],
+    required: ["agent", "feelings"],
     properties: {
       agent: { type: "string", minLength: 1, maxLength: 64,
         description: "Stable identifier for this agent (Claude Code session_id or agent name)." },
-      face: {
-        type: "object",
-        additionalProperties: false,
-        required: faceKeys(),
-        properties: Object.fromEntries(faceKeys().map((k) => [k,
-          { type: "number", minimum: 0, maximum: 1 }])),
-      },
       feelings: {
         type: "array", minItems: 1, maxItems: 6,
         items: {

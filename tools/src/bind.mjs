@@ -74,6 +74,19 @@ export async function bindDashboardPort() {
   return bindState();
 }
 
+// Point `record()` at a running dashboard without binding our own port.
+// Used by the MCP child process so it forwards reports to the real
+// dashboard instead of greedily binding 7778+ and broadcasting into a
+// private SSE channel no one is listening to.
+export async function discoverDashboard() {
+  if (_state.bound) return bindState();
+  const active = await readActivePort();
+  _state.bound = false;
+  _state.port = active || null;
+  _state.url = active ? `http://127.0.0.1:${active}` : null;
+  return bindState();
+}
+
 // Probe an existing dashboard host. Returns null if nothing alive on the
 // recorded port.
 export async function readActivePort() {
