@@ -1,5 +1,17 @@
 # swarmeq changelog
 
+## 0.7.0 — chart polish: per-segment trace coloring, 4-hour window, event log
+
+### Fixed
+- **Sentiment chart trace is no longer a single color based on current state.** Through 0.6.x the trace polyline used a global `--tone` set by `renderSentiment` to whichever color matched the *latest* ratio, so a team that's currently positive saw the entire history line drawn green even where the historical ratio was negative. The trace now splits into per-segment line elements, colored green above the 0.5 baseline and red below, with stroke-opacity scaling by distance from 0.5 (segments near neutral are muted; segments at extremes are saturated). Segments that cross 0.5 between consecutive points are split at the midline crossing so the color flips cleanly.
+
+### Added
+- **4-hour chart window.** The chart now clips to the most recent 4 hours of history rather than rendering the full retained range. Long-running teams no longer squish recent activity into a sliver. Backend storage (`sentiment.jsonl`, cap 1000) is unchanged — just the display is clipped.
+- **Event log under the chart.** A compact list of agent join/leave events derived from `agentCount` deltas in the sentiment history, scoped to the same 4-hour window as the chart. Each row: `HH:MM  +/−  display_name  N total`. Joins get a best-effort name lookup via closest `started_ts` in the current registry (60s tolerance); leaves show as `agent left` since the registry no longer holds the departed agent. Lets you correlate the chart's triangle markers with which specific agent affected team mood — "did the mood drop when the qa subagent joined?" is now answerable at a glance.
+
+### Changed
+- New CSS classes `.trace-pos` / `.trace-neg` replace the single `.trace` class (still defined as a fallback in case anything else references it). Chart trace stroke colors are `var(--c-peaceful)` (green) and `var(--c-sad)` (red), reusing the same palette tokens as the shaded areas underneath.
+
 ## 0.6.0 — human-readable agent names on the dashboard
 
 ### Added

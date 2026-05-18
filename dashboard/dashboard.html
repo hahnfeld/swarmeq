@@ -523,16 +523,44 @@
   }
   .chart-bay .area-pos { fill: var(--c-peaceful); fill-opacity: 0.10; }
   .chart-bay .area-neg { fill: var(--c-sad); fill-opacity: 0.10; }
-  .chart-bay .trace {
-    stroke: var(--tone, var(--text-2));
+  /* Per-segment trace lines (0.7.0+). Hue tracks polarity; stroke-opacity
+     is set inline per segment to encode intensity (distance from 0.5). */
+  .chart-bay .trace-pos {
+    stroke: var(--c-peaceful);
     stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
     fill: none;
-    transition: stroke 720ms ease;
+  }
+  .chart-bay .trace-neg {
+    stroke: var(--c-sad);
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+    fill: none;
   }
   .chart-bay .dot {
     fill: var(--tone, var(--text-2));
     transition: fill 720ms ease;
   }
+  /* Event log under the chart (0.7.0+). Compact, monospaced row per
+     join/leave inferred from sentiment-history agentCount deltas. */
+  .event-log {
+    list-style: none; margin: 12px 0 0; padding: 0;
+    font-family: var(--mono); font-size: 11px; line-height: 1.6;
+    color: var(--text-2);
+    max-height: 96px; overflow-y: auto;
+  }
+  .event-log:empty::before {
+    content: "no agent joins/leaves yet";
+    color: var(--text-4); font-size: 11px;
+    font-family: var(--mono); letter-spacing: 0.08em;
+  }
+  .event-log li { display: grid; grid-template-columns: 56px 16px 1fr auto; gap: 10px; padding: 1px 4px; }
+  .event-log li:hover { background: var(--bg-1); border-radius: 3px; }
+  .event-log .ev-time { color: var(--text-3); }
+  .event-log .ev-sign { font-weight: 600; }
+  .event-log .ev-sign.join { color: var(--c-peaceful); }
+  .event-log .ev-sign.leave { color: var(--c-sad); }
+  .event-log .ev-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event-log .ev-count { color: var(--text-3); font-size: 10.5px; }
+
   .chart-bay .empty-label {
     font-family: var(--mono); font-size: 11px;
     fill: var(--text-4); letter-spacing: 0.10em;
@@ -671,6 +699,11 @@
       <div class="chart-bay">
         <svg id="sentiment-chart" viewBox="0 0 600 160" preserveAspectRatio="none" aria-label="sentiment over time"></svg>
       </div>
+
+      <!-- Event log: joins and leaves in the chart's 4-hour window, with
+           best-effort agent name attribution. Lets you correlate the chart's
+           triangle markers with which specific agent affected team mood. -->
+      <ol class="event-log" id="event-log" aria-label="agent join/leave events"></ol>
     </div>
   </section>
 
@@ -822,6 +855,7 @@ function setView(view, push) {
     renderTeamWheel();
     renderSentimentReadout();
     renderSentimentChart();
+    renderEventLog();
   } else if (store.active) {
     renderActive();
   }
@@ -1320,6 +1354,24 @@ function fmtHHMM(ts) {
   return `${hh}:${mm}`;
 }
 
+// Opacity scaling for trace segments: 0 at exactly 0.5, 1.0 at 0 or 1.
+// Uses the max distance-from-0.5 across both endpoints so a segment that
+// peaks away from neutral is rendered at its peak's saturation. Floor at
+// 0.25 so segments hovering right at the midline don't vanish entirely.
+function intensityOpacity(rA, rB) {
+  const d = Math.max(Math.abs(rA - 0.5), Math.abs(rB - 0.5));
+  return Math.max(0.25, Math.min(1, d * 2));
+}
+
+function drawTraceSegment(svg, NS, x1, y1, x2, y2, className, opacity) {
+  const l = document.createElementNS(NS, "line");
+  l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+  l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+  l.setAttribute("class", className);
+  l.setAttribute("stroke-opacity", String(opacity));
+  svg.appendChild(l);
+}
+
 function renderSentimentChart() {
   const svg = $("sentiment-chart");
   svg.replaceChildren();
@@ -1332,7 +1384,13 @@ function renderSentimentChart() {
   const topY  = PAD.top;         // y for 100%
 
   const NS = "http://www.w3.org/2000/svg";
-  const points = store.history.filter(p => Number.isFinite(p.ts));
+  // Chart window: most recent 4 hours. Backend retains up to 1000 history
+  // points; we just clip the display so long-running teams don't squish
+  // the recent activity into a sliver. The constant is also reused by the
+  // event log so the two views stay in sync.
+  const WINDOW_MS = 4 * 60 * 60 * 1000;
+  const cutoff = Date.now() - WINDOW_MS;
+  const points = store.history.filter(p => Number.isFinite(p.ts) && p.ts >= cutoff);
 
   // Y-axis labels (100, 50, 0)
   for (const [val, y] of [[100, topY], [50, midY], [0, baseY]]) {
@@ -1435,11 +1493,42 @@ function renderSentimentChart() {
     negPath.setAttribute("d", negD.join(" ")); negPath.setAttribute("class", "area-neg");
     svg.appendChild(negPath);
 
-    // Trace line
-    const trace = document.createElementNS(NS, "polyline");
-    trace.setAttribute("points", seg.map(p => `${xOf(p.ts)},${yOf(p.ratio)}`).join(" "));
-    trace.setAttribute("class", "trace");
-    svg.appendChild(trace);
+    // Trace line — split into per-pair line segments, colored by polarity
+    // (green above the 0.5 baseline, red below) with stroke-opacity scaled
+    // by distance from 0.5 so the line "muting" toward neutral and saturated
+    // away from it. Pairs that cross 0.5 are split at the midline so the
+    // segment color flips cleanly at the crossover rather than misattributing
+    // a green slice as red or vice versa.
+    for (let i = 0; i < seg.length - 1; i++) {
+      const a = seg[i], b = seg[i + 1];
+      const aAbove = a.ratio >= 0.5;
+      const bAbove = b.ratio >= 0.5;
+      if (aAbove === bAbove) {
+        drawTraceSegment(svg, NS, xOf(a.ts), yOf(a.ratio), xOf(b.ts), yOf(b.ratio),
+          aAbove ? "trace-pos" : "trace-neg",
+          intensityOpacity(a.ratio, b.ratio));
+      } else {
+        // Crossover: linear interpolate to find where ratio == 0.5
+        const t = (0.5 - a.ratio) / (b.ratio - a.ratio);
+        const xCross = xOf(a.ts + t * (b.ts - a.ts));
+        drawTraceSegment(svg, NS, xOf(a.ts), yOf(a.ratio), xCross, midY,
+          aAbove ? "trace-pos" : "trace-neg",
+          intensityOpacity(a.ratio, 0.5));
+        drawTraceSegment(svg, NS, xCross, midY, xOf(b.ts), yOf(b.ratio),
+          bAbove ? "trace-pos" : "trace-neg",
+          intensityOpacity(0.5, b.ratio));
+      }
+    }
+    // Single-point segment: draw a dot at the data point.
+    if (seg.length === 1) {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", xOf(seg[0].ts)); c.setAttribute("cy", yOf(seg[0].ratio));
+      c.setAttribute("r", 1.4);
+      c.setAttribute("class", seg[0].ratio >= 0.5 ? "trace-pos" : "trace-neg");
+      c.setAttribute("fill", "currentColor");
+      c.setAttribute("stroke-opacity", intensityOpacity(seg[0].ratio, seg[0].ratio));
+      svg.appendChild(c);
+    }
   }
 
   // Last-point dot in the dynamic tone
@@ -1478,6 +1567,73 @@ function renderSentimentChart() {
     tri.appendChild(title);
     svg.appendChild(tri);
     prevCount = c;
+  }
+}
+
+// Event log: scan the same 4-hour window of sentiment history that the chart
+// uses. Each agentCount change is a join (delta>0) or leave (delta<0). For
+// joins, look up the agent in registry by closest started_ts and use their
+// display_name. For leaves, we can't attribute (registry only has currently
+// living agents); show the count and delta. Best-effort — the goal is
+// pattern-matching against the chart's triangle markers, not auditing.
+function renderEventLog() {
+  const log = document.getElementById("event-log");
+  if (!log) return;
+  log.replaceChildren();
+  const WINDOW_MS = 4 * 60 * 60 * 1000;
+  const cutoff = Date.now() - WINDOW_MS;
+  const history = (store.history || []).filter(p => Number.isFinite(p.ts) && p.ts >= cutoff);
+  if (history.length === 0) return;
+  // Build "agents by started_ts asc" once for join-attribution lookups.
+  const reg = store.registry || {};
+  const regSlugs = Object.keys(reg).filter(k => Number.isFinite(reg[k]?.started_ts));
+  const findJoinName = (ts) => {
+    // Closest started_ts within ±5s of the event ts wins. Stop hooks +
+    // sentiment broadcasts can introduce a small skew between when the
+    // agent registered and when the agentCount delta lands in history.
+    let best = null, bestDt = Infinity;
+    for (const slug of regSlugs) {
+      const dt = Math.abs((reg[slug].started_ts || 0) - ts);
+      if (dt < bestDt) { bestDt = dt; best = slug; }
+    }
+    if (!best || bestDt > 60_000) return null; // 60s tolerance
+    return reg[best].display_name || best;
+  };
+  let prev = 0;
+  const events = [];
+  for (const p of history) {
+    const c = Number(p.agentCount) || 0;
+    if (c === prev) continue;
+    const delta = c - prev;
+    const isJoin = delta > 0;
+    events.push({
+      ts: p.ts,
+      delta,
+      count: c,
+      name: isJoin ? findJoinName(p.ts) : null,
+    });
+    prev = c;
+  }
+  // Newest first reads more naturally for "what just changed."
+  events.reverse();
+  for (const ev of events) {
+    const li = document.createElement("li");
+    const time = document.createElement("span"); time.className = "ev-time";
+    time.textContent = fmtHHMM(ev.ts);
+    const sign = document.createElement("span");
+    sign.className = "ev-sign " + (ev.delta > 0 ? "join" : "leave");
+    sign.textContent = ev.delta > 0 ? "+" : "−";
+    const name = document.createElement("span"); name.className = "ev-name";
+    if (ev.delta > 0) {
+      name.textContent = ev.name ? ev.name : "(unknown agent)";
+    } else {
+      // Leaves: don't try to name. We don't persist who left.
+      name.textContent = "agent left";
+    }
+    const count = document.createElement("span"); count.className = "ev-count";
+    count.textContent = `${ev.count} total`;
+    li.append(time, sign, name, count);
+    log.appendChild(li);
   }
 }
 
