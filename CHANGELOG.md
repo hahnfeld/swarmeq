@@ -1,5 +1,10 @@
 # swarmeq changelog
 
+## 0.8.1 — clarify Willcox wheel attribution as a derivative work
+
+### Changed
+- **In-UI wheel attribution and README "Source material" / "78-entry Willcox 1982 taxonomy" sections** now explicitly state that swarmeq's wheel is an *adaptation* of the 1982 Willcox feelings wheel — a curated 78-label subset with our own color palette and SVG layout — rather than a verbatim reproduction. The v0.8.0 in-UI credit line said "after Willcox" which is correct in academic style but too subtle for a general reader; the new wording (`Feelings wheel here is an adaptation … Not a verbatim reproduction of the 1982 wheel.`) makes the derivative-work status unambiguous. No code or schema changes — docs and one HTML string only.
+
 ## 0.8.0 — FEVS Intrinsic Work Experience panel on the per-agent view
 
 ### Added
@@ -9,10 +14,10 @@
 - **Schema extension on `Report`** (`tools/src/validate.ts`): optional `iwe?: { [itemNumber: string]: number }` field. Keys must parse to integers in [1, 5]; values must be integers in [1, 5]. Empty `{}` and absent `iwe` both valid. Reports from before 0.8.0 validate unchanged (backward-compatible).
 - **Introspection prompt** (`tools/src/prompt.ts`) updated to include the 5 IWE items and instruct the model to emit `iwe` in its JSON reply alongside `feelings` and `note`.
 - **Static route** `/iwe.json` served by the daemon so the dashboard fetches the canonical item set the same way it fetches `/feelings.json`.
-- **Willcox attribution** under the wheel SVG. The Willcox 1982 feelings wheel had been visualized in-UI for years without an in-page citation; this release adds a small credit line.
+- **Willcox attribution** under the wheel SVG. The wheel shown in swarmeq is an *adaptation* of the 1982 Willcox feelings wheel — a curated 78-label subset with our own color palette and SVG layout — and had been visualized in-UI for years without an in-page citation. This release adds a small credit line that explicitly calls out the derivative-work status, so readers don't mistake the visualization for a verbatim reproduction of the original.
 
 ### Source attributions (in-dashboard)
-- **Willcox feelings wheel** (under the wheel): Willcox, G. (1982), "The Feelings Wheel," *Transactional Analysis Journal* 12(4): 274–276.
+- **Willcox feelings wheel** (under the wheel): *adapted from* Willcox, G. (1982), "The Feelings Wheel," *Transactional Analysis Journal* 12(4): 274–276. swarmeq's wheel is a derivative work — curated 78-label subset, our own palette and SVG layout — not a verbatim reproduction.
 - **Intrinsic Work Experience items** (under the IWE panel): U.S. OPM Federal Employee Viewpoint Survey, Intrinsic Work Experience Sub-Index, 2023 FEVS Technical Report (Revised April 2025), p. 13. Public domain (17 U.S.C. § 105). Item 5 adapted ("agency's" → "the user's"); original FEVS Q7 reproduced in-panel.
 
 ### Tests

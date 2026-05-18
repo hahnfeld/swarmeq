@@ -1,6 +1,6 @@
 {
   "name": "swarmeq-tools",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Maintainer-only build chain for swarmeq. Not shipped to users.",
   "private": true,
   "type": "module",

@@ -52,7 +52,7 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.0.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.1.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
@@ -114,7 +114,7 @@ Six core emotions, six secondaries per core, one tertiary per secondary.
 | **powerful** (#DD6B20) | faithful → loyal · important → valuable · appreciated → cherished · respected → admired · proud → successful · aware → discerning |
 | **peaceful** (#38A169) | trusting → secure · nurturing → caring · intimate → close · loving → affectionate · thankful → grateful · content → satisfied |
 
-Source: Willcox, G. (1982). *The Feeling Wheel*. Transactional Analysis Journal, 12(4):274–276. swarmeq cites this work as factual reference; the taxonomy is a curated subset of the canonical 1982 list.
+Source: *adapted from* Willcox, G. (1982). *The Feeling Wheel*. Transactional Analysis Journal, 12(4):274–276. The taxonomy above is a curated 78-label subset of the canonical 1982 list with swarmeq's own color palette — a derivative work, not a verbatim reproduction.
 
 ## Building from source
 
@@ -128,7 +128,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.8.0
+## Status: 0.8.1
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
@@ -141,7 +141,7 @@ Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windo
 
 The dashboard visualizes two well-known instruments, both attributed in the UI itself:
 
-- **Feelings wheel** (under the wheel) — Willcox, G. (1982). "The Feelings Wheel." *Transactional Analysis Journal* 12(4): 274–276. swarmeq uses a curated 78-entry subset of the 1982 taxonomy.
+- **Feelings wheel** (under the wheel) — *adapted from* Willcox, G. (1982). "The Feelings Wheel." *Transactional Analysis Journal* 12(4): 274–276. swarmeq's wheel is a derivative work: a curated 78-label subset of the 1982 taxonomy with our own color palette and SVG layout. It is **not** a verbatim reproduction of the original wheel.
 - **Intrinsic Work Experience (5 items)** (under the IWE panel) — U.S. OPM Federal Employee Viewpoint Survey, Intrinsic Work Experience Sub-Index, [2023 FEVS Technical Report](https://www.opm.gov/fevs/) (Revised April 2025), p. 13. The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105); items 1–4 in `dashboard/iwe.json` are reproduced verbatim. Item 5 is adapted for the AI-agent-team context ("agency's" → "the user's"); the original FEVS Q7 wording is preserved in the in-panel attribution.
 
 ## License
