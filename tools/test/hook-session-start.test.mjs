@@ -79,3 +79,43 @@ test("session-start: missing CLAUDE_PLUGIN_ROOT does not block hook completion",
   });
 });
 
+// 0.6.0: SessionStart parses the parent claude process's argv for
+// --agent-name/--team-name/--agent-type/--parent-session-id. In the test
+// environment the parent is node (no --agent-id flags), so the hook falls
+// back to deriving a lead-style display_name from the cwd basename. This
+// asserts the fallback path; the teammate path is verified in the live
+// dashboard test against a real Agent Teams run.
+test("session-start: lead fallback derives display_name from cwd basename", async () => {
+  await withTempState((dir) => {
+    const result = runHook(JSON.stringify({
+      session_id: "lead-derives",
+      cwd: "/Users/mhahnfeld/Projects/fun_team",
+    }));
+    assert.equal(result.status, 0);
+    const reg = JSON.parse(fs.readFileSync(path.join(dir, "registry.json"), "utf8"));
+    const entry = reg["lead-der"]; // first 8 chars of "lead-derives"
+    assert.ok(entry, `expected an entry; got ${JSON.stringify(Object.keys(reg))}`);
+    assert.equal(entry.display_name, "lead@fun_team",
+      "lead display_name should be `lead@<cwd-basename>` when no --agent-id is on parent argv");
+    // Teammate-only fields stay undefined for the lead fallback.
+    assert.equal(entry.agent_type, undefined);
+    assert.equal(entry.team_name, undefined);
+    assert.equal(entry.parent_session_id, undefined);
+  });
+});
+
+test("session-start: lead fallback handles missing/empty cwd as lead@unknown", async () => {
+  await withTempState((dir) => {
+    // Empty cwd in payload + the hook spawn defaults to process.cwd() of the
+    // test runner. We can't easily make process.cwd() empty, so just verify
+    // the display_name has the `lead@` prefix and a non-empty basename.
+    const result = runHook(JSON.stringify({ session_id: "lead-defaults" }));
+    assert.equal(result.status, 0);
+    const reg = JSON.parse(fs.readFileSync(path.join(dir, "registry.json"), "utf8"));
+    const entry = reg["lead-def"];
+    assert.ok(entry);
+    assert.match(entry.display_name, /^lead@\S+$/,
+      "display_name must always start with 'lead@' for non-teammate sessions");
+  });
+});
+

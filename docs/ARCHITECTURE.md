@@ -66,11 +66,28 @@ The probe parses the JSON out of `--output-format json`'s `result` field (tolera
 
 `probe-report-written` (SSE + probe.log) is the new "success" signal alongside `probe-no-report` (the "model didn't emit parseable JSON" diagnostic). `modelResult` is still captured on failure for prompt-tuning.
 
-The plugin's `plugin.json` `mcpServers` declaration is still needed — it's what makes the tool available to the **lead** session and to standalone use. The user-scope `settings.json` block is additive: it covers the teammate case the plugin manifest can't reach.
+The plugin's `plugin.json` `mcpServers` declaration is still kept — any session whose catalog already includes `mcp__swarmeq__report` (lead sessions, manually-authored slash commands) can still call it directly. The probe path doesn't depend on it.
+
+## Identity and display names
+
+Internally, registry entries are keyed on `sid.slice(0, 8)` — a stable, opaque 8-char slug derived from the session id. That's what `AGENT_FILE(<slug>) → state/<slug>.json` uses, and what the probe injects into the `agent` field of every report. The slug never changes for a given session.
+
+For the dashboard, slugs are unreadable. So `SessionStart` also captures human-readable metadata by parsing the parent claude process's argv:
+
+| argv flag | Captured as | Used for |
+| --- | --- | --- |
+| `--agent-name` | `agent_type` (also feeds `display_name`) | tile label, future filtering |
+| `--team-name` | `team_name` (also feeds `display_name`) | tile label, future grouping |
+| `--agent-type` | `agent_type` | (currently same as `--agent-name`) |
+| `--parent-session-id` | `parent_session_id` | lineage from teammate back to lead |
+
+Why argv and not the SessionStart event stdin: Claude Code's SessionStart event payload doesn't surface these fields, but they're right there on the parent process's command line. The hook reads its parent (`$PPID`) via `/proc/$PPID/cmdline` on Linux or `ps -wwp $PPID -o command=` on macOS/everywhere else, then a small token scan extracts the four fields. Failures (no permission, ps missing, parent already exited) are non-fatal — the hook falls back to a `lead@<cwd-basename>` display name and registers the entry anyway.
+
+`display_name` is what the dashboard tiles and the active-portrait label render. Teammates show as `<agent-name>@<team-name>` (e.g. `qa@pocketweather-mood`); leads show as `lead@<cwd-basename>` (e.g. `lead@fun_team`) which mirrors the teammate shape and lets you tell parallel leads in different projects apart at a glance.
 
 ## Hooks at a glance
 
-- **`SessionStart`** — register the teammate in `registry.json`; ensure the daemon is running. Never opens a browser — that's `/swarmeq-dashboard`'s job, since spawning N parallel teammates would otherwise open N browser tabs.
+- **`SessionStart`** — register the teammate in `registry.json` and capture human-readable identity (`display_name`, `agent_type`, `team_name`, `parent_session_id`) by parsing the parent claude process's argv for `--agent-name` / `--team-name` / `--agent-type` / `--parent-session-id`. Lead sessions (no `--agent-id` on parent argv) fall back to `lead@<cwd-basename>`. Ensures the daemon is running. Never opens a browser — that's `/swarmeq-dashboard`'s job, since spawning N parallel teammates would otherwise open N browser tabs.
 - **`Stop`** — auto-probe with the 90-second throttle; ensure the daemon is running.
 - **`SessionEnd`** — remove the teammate from `registry.json`; delete its `<agent>.json`.
 - **`SubagentStop`** — no-op. Task subagents aren't peer sessions; they can't be `--fork-session`-cloned the way peers can.

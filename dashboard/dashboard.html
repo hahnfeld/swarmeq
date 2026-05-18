@@ -236,7 +236,7 @@
     margin-left: -2px;
   }
   .agent.selected .pct { color: var(--text-2); }
-  .agent.stuck::before {
+  .agent.struggling::before {
     content: ""; width: 6px; height: 6px; border-radius: 50%;
     background: var(--alarm); margin-right: -2px;
     box-shadow: 0 0 8px var(--alarm);
@@ -782,6 +782,9 @@ const store = {
 };
 const $ = id => document.getElementById(id);
 const getCSS = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+// Prefer the human-readable display_name written by SessionStart (0.6.0+);
+// fall back to the registry slug for older entries / hot-upgrade racing.
+const displayNameFor = slug => (store.registry?.[slug]?.display_name) || slug;
 
 async function init() {
   const fres = await fetch("/feelings.json");
@@ -967,9 +970,9 @@ function setLive(cls, txt) {
 
 function updateChrome() {
   const n = Object.keys(store.agents).length;
-  const stuck = countStuck();
+  const struggling = countStruggling();
   let crumb = `${n} agent${n === 1 ? "" : "s"} reporting`;
-  if (stuck > 0) crumb += ` · ${stuck} stuck`;
+  if (struggling > 0) crumb += ` · ${struggling} struggling`;
   const crumbEl = $("crumb");
   crumbEl.replaceChildren();
   const b = document.createElement("b"); b.textContent = crumb;
@@ -977,16 +980,24 @@ function updateChrome() {
   applyViewVisibility();
 }
 
-function countStuck() {
-  // "stuck" = dominant feeling is in mad / scared / sad with intensity >= 0.6
-  const stuckCores = new Set(["mad", "scared", "sad"]);
-  let n = 0;
-  for (const r of Object.values(store.agents)) {
-    const dom = r.feelings[0];
-    if (!dom) continue;
-    const core = coreForLabel(dom.label);
-    if (core && stuckCores.has(core.label) && dom.intensity >= 0.6) n++;
+// "struggling" = ANY reported feeling rolls up to a mad/scared/sad core with
+// intensity >= 0.6. Scanning the full feelings list (not just the dominant
+// one) catches cases like "thoughtful 0.7 + skeptical 0.6" where the agent's
+// primary signal is positive but a strong negative undercurrent is present
+// — the kind of state worth surfacing on the team view.
+const STRUGGLING_CORES = new Set(["mad", "scared", "sad"]);
+function isStrugglingReport(r) {
+  if (!r || !Array.isArray(r.feelings)) return false;
+  for (const f of r.feelings) {
+    if (!(f && f.intensity >= 0.6)) continue;
+    const core = coreForLabel(f.label);
+    if (core && STRUGGLING_CORES.has(core.label)) return true;
   }
+  return false;
+}
+function countStruggling() {
+  let n = 0;
+  for (const r of Object.values(store.agents)) if (isStrugglingReport(r)) n++;
   return n;
 }
 
@@ -1000,20 +1011,21 @@ function renderTeam() {
     const core = dom ? coreForLabel(dom.label) : null;
     const tone = core ? core.color : getCSS("--text-3");
     const intensity = dom ? Math.round(dom.intensity * 100) : 0;
-    const isStuck = core && new Set(["mad","scared","sad"]).has(core.label) && dom && dom.intensity >= 0.6;
+    const isStruggling = isStrugglingReport(r);
     const a = document.createElement("button");
     a.type = "button";
     a.className = "agent"
       + (name === store.active ? " selected" : "")
       + (store.stale.has(name) ? " stale" : "")
-      + (isStuck ? " stuck" : "");
+      + (isStruggling ? " struggling" : "");
     a.style.setProperty("--tone", tone);
     a.setAttribute("aria-pressed", name === store.active ? "true" : "false");
+    const label = displayNameFor(name);
     a.setAttribute("aria-label",
-      `${name}, ${dom ? dom.label.toLowerCase() : "no report"}${dom ? `, ${intensity}%` : ""}${isStuck ? ", needs attention" : ""}`);
+      `${label}, ${dom ? dom.label.toLowerCase() : "no report"}${dom ? `, ${intensity}%` : ""}${isStruggling ? ", struggling" : ""}`);
 
     const glyph = document.createElement("span"); glyph.className = "glyph"; glyph.innerHTML = faceSvg(dom ? dom.label.toLowerCase() : "peaceful");
-    const nameEl = document.createElement("span"); nameEl.className = "name"; nameEl.textContent = name;
+    const nameEl = document.createElement("span"); nameEl.className = "name"; nameEl.textContent = label;
     const feelingEl = document.createElement("span"); feelingEl.className = "feeling"; feelingEl.textContent = dom ? dom.label.toLowerCase() : "—";
     const meter = document.createElement("span"); meter.className = "meter";
     const fill = document.createElement("span"); fill.className = "fill"; fill.style.width = `${intensity}%`;
@@ -1059,7 +1071,7 @@ function renderActive() {
   }
 
   // Right column
-  $("portrait-name").textContent = store.active;
+  $("portrait-name").textContent = displayNameFor(store.active);
   $("feeling-name").textContent = dom ? dom.label.toLowerCase() : "—";
   $("feeling-pct").textContent = dom ? `${(dom.intensity * 100).toFixed(0)}%` : "—";
   $("feeling-fill").style.width = dom ? `${dom.intensity * 100}%` : "0%";

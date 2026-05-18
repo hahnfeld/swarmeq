@@ -13,6 +13,15 @@ export interface RegistryEntry {
   started_ts: number;
   last_seen_ts: number;
   last_probe_ts?: number;
+  // Display metadata (0.6.0+). Populated by the SessionStart hook from the
+  // parent claude process's argv (--agent-name / --team-name / --agent-type /
+  // --parent-session-id). Optional: leads only set display_name; teammates
+  // set all four. The dashboard prefers display_name over the registry key
+  // when rendering tile/tab labels.
+  display_name?: string;
+  agent_type?: string;
+  team_name?: string;
+  parent_session_id?: string;
 }
 export type Registry = Record<string, RegistryEntry>;
 

@@ -3,7 +3,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 
 const dir = process.env.SWARMEQ_STATE_DIR || path.join(os.homedir(), ".claude", "plugins", "swarmeq", "state");
 fs.mkdirSync(dir, { recursive: true });
@@ -21,6 +21,15 @@ interface RegistryEntry {
   started_ts: number;
   last_seen_ts: number;
   last_probe_ts?: number;
+  // Display metadata (0.6.0+). Optional — leads in a non-team context have
+  // only display_name set; teammates have all four. Populated from the
+  // parent claude process's argv at SessionStart time, since Claude Code
+  // doesn't surface --agent-id / --agent-name / --team-name through the
+  // SessionStart event payload itself.
+  display_name?: string;
+  agent_type?: string;
+  team_name?: string;
+  parent_session_id?: string;
 }
 type Registry = Record<string, RegistryEntry>;
 interface HookEvent {
@@ -49,6 +58,82 @@ const cleanModel = (s: unknown): string => {
 // Probe forks of agents re-enter this hook on session start. Don't register
 // them as separate agents and don't open another browser tab.
 if (process.env.SWARMEQ_PROBE === "1") process.exit(0);
+
+// Read the parent process's command line so we can mine --agent-name /
+// --team-name / --agent-type / --parent-session-id out of the claude
+// invocation. Claude Code doesn't surface these through the SessionStart
+// stdin event, but they're right there on argv. /proc is Linux's fast
+// path (NUL-separated cmdline). ps is the cross-platform fallback.
+// Returns the empty string on any failure — we always fall back to a
+// reasonable display_name derived from cwd.
+interface ParentArgs {
+  agentName?: string;
+  teamName?: string;
+  agentType?: string;
+  parentSessionId?: string;
+}
+
+function readParentCommandLine(): string {
+  const ppid = process.ppid;
+  if (!ppid || ppid < 2) return "";
+  try {
+    const f = `/proc/${ppid}/cmdline`;
+    if (fs.existsSync(f)) {
+      return fs.readFileSync(f, "utf8").replace(/\0/g, " ").trim();
+    }
+  } catch { /* fall through to ps */ }
+  try {
+    return execSync(`ps -wwp ${ppid} -o command=`, { encoding: "utf8", timeout: 200 }).trim();
+  } catch { return ""; }
+}
+
+function parseClaudeArgs(cmdline: string): ParentArgs {
+  const out: ParentArgs = {};
+  if (!cmdline) return out;
+  const tokens = cmdline.split(/\s+/);
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const flag = tokens[i];
+    const val = tokens[i + 1];
+    if (!val || val.startsWith("--")) continue;
+    if (flag === "--agent-name") out.agentName = val;
+    else if (flag === "--team-name") out.teamName = val;
+    else if (flag === "--agent-type") out.agentType = val;
+    else if (flag === "--parent-session-id") out.parentSessionId = val;
+  }
+  return out;
+}
+
+// Display name: `<agent-name>@<team-name>` for teammates, `lead@<cwd-basename>`
+// for parent sessions (which don't have --agent-id on argv). Mirrors the
+// `name@team` shape Claude Code itself uses for teammate IDs so the dashboard
+// reads consistently. Falls back to `lead@unknown` only if both argv parse
+// and cwd resolution fail.
+function deriveDisplayName(parsed: ParentArgs, cwd: string): string {
+  if (parsed.agentName && parsed.teamName) return `${parsed.agentName}@${parsed.teamName}`;
+  if (parsed.agentName) return parsed.agentName;
+  let base = "";
+  try { base = path.basename(cwd) || ""; } catch { base = ""; }
+  return `lead@${base || "unknown"}`;
+}
+
+// Exposed via this single function so the SessionStart hook body stays
+// straight-line. Failures are non-fatal — we always return *something*
+// the dashboard can render.
+function gatherIdentity(cwd: string): {
+  displayName: string;
+  agentType?: string;
+  teamName?: string;
+  parentSessionId?: string;
+} {
+  let parsed: ParentArgs = {};
+  try { parsed = parseClaudeArgs(readParentCommandLine()); } catch { /* swallow */ }
+  return {
+    displayName: deriveDisplayName(parsed, cwd),
+    agentType: parsed.agentType,
+    teamName: parsed.teamName,
+    parentSessionId: parsed.parentSessionId,
+  };
+}
 
 interface DaemonIdentity { pid: number; root: string; version: string }
 
@@ -154,14 +239,20 @@ process.stdin.on("end", async () => {
     const evt: HookEvent = body ? JSON.parse(body) : {};
     const sid = sanitize(evt.session_id || evt.sessionId || "unknown");
     const agent = sanitize(evt.agent_name || evt.agentName || (sid !== "unknown" ? sid.slice(0, 8) : "unknown"));
+    const cwd = evt.cwd || process.cwd();
+    const identity = gatherIdentity(cwd);
     let reg: Registry = {};
     try { reg = JSON.parse(fs.readFileSync(REG, "utf8")); } catch {}
     reg[agent] = {
       session_id: sid,
       model: cleanModel(evt.model || process.env.ANTHROPIC_MODEL || "unknown"),
-      cwd: evt.cwd || process.cwd(),
+      cwd,
       started_ts: Date.now(),
       last_seen_ts: Date.now(),
+      display_name: identity.displayName,
+      ...(identity.agentType && { agent_type: identity.agentType }),
+      ...(identity.teamName && { team_name: identity.teamName }),
+      ...(identity.parentSessionId && { parent_session_id: identity.parentSessionId }),
     };
     const tmp = REG + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));

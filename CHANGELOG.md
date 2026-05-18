@@ -1,5 +1,19 @@
 # swarmeq changelog
 
+## 0.6.0 — human-readable agent names on the dashboard
+
+### Added
+- **Display names on every tile and the active portrait.** Teammates show as `<agent-name>@<team-name>` (e.g. `qa@pocketweather-mood`), leads show as `lead@<cwd-basename>` (e.g. `lead@fun_team`). No more 8-char slugs. Mechanism: the `SessionStart` hook now parses the parent claude process's argv for `--agent-name` / `--team-name` / `--agent-type` / `--parent-session-id`, captures them into the registry entry, and the dashboard prefers `display_name` when rendering. Argv is read via `/proc/$PPID/cmdline` on Linux and `ps -wwp $PPID -o command=` on macOS/everywhere else. Failures are non-fatal — the hook falls back to `lead@<cwd-basename>` and registers the entry anyway.
+- New `RegistryEntry` fields (`display_name`, `agent_type`, `team_name`, `parent_session_id`) — all optional, additive over existing entries. `AGENT_FILE(<slug>) → state/<slug>.json` is unchanged; no migration needed.
+
+### Changed
+- **"Stuck" → "Struggling"** rename across the dashboard (chip label on the top bar, tile CSS class, aria-label, function names in JS). The new word better captures the intended signal — an agent showing distress that may need attention, not necessarily one that has stalled.
+- **Struggling detection now scans the full feelings list, not just the dominant feeling.** An agent reporting `thoughtful=0.7, skeptical=0.6, …` was previously not flagged because thoughtful (peaceful core) was dominant; now it is, because skeptical (mad core) hits the 0.6 threshold. Matches user intuition that "any strong negative undercurrent" is worth surfacing, not just "dominant negative feeling."
+- README and `docs/ARCHITECTURE.md` updated. Architecture doc has a new "Identity and display names" section explaining the argv-parsing mechanism and the slug-vs-display-name layering. `SessionStart` bullet in "Hooks at a glance" now mentions identity capture.
+
+### Tests
+- Two new tests in `tools/test/hook-session-start.test.mjs` covering the lead fallback path (display_name = `lead@<cwd-basename>` when no `--agent-id` is on parent argv, and a sanity check for the `lead@<non-empty>` shape). 107 tests pass on Node 22+.
+
 ## 0.5.0 — JSON-only fork probe; v0.4.x install path rolled back
 
 ### Changed (breaking, in the architectural sense — user-visible surface only loses one slash command)

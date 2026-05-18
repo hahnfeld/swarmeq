@@ -8,7 +8,7 @@ When you run a Claude Code Agent Team, each teammate has its own context window.
 
 swarmeq fixes the blindness. Every ~90 seconds, each teammate takes about 5 seconds to jot down how it's actually doing — `frustrated`, `confused`, `eager`, `confident` — with intensities and one sentence of context. A live dashboard in your browser shows the whole team at a glance, plus a per-agent detail view.
 
-**Use it to:** spot a stuck teammate before it burns hours, verify the team is healthy before kicking off a long task, or debug after the fact why a run diverged from what you expected.
+**Use it to:** spot a struggling teammate before it burns hours, verify the team is healthy before kicking off a long task, or debug after the fact why a run diverged from what you expected.
 
 It's an observability tool, not a control plane — swarmeq watches; it never interrupts.
 
@@ -52,7 +52,7 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.5.0.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.6.0.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
@@ -128,7 +128,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.5.0
+## Status: 0.6.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
