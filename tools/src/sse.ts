@@ -5,6 +5,7 @@ export type SseEvent =
   | "probe-failed"
   | "probe-exit"
   | "probe-no-report"
+  | "probe-report-written"
   | "agent-removed"
   | "sentiment"
   | "model-mismatch";

@@ -47,21 +47,30 @@ Four small mechanisms keep things working even when the world is messy:
 - **Seamless upgrades.** That same identity check also catches daemons left behind by an earlier plugin install: when the running daemon's `version` doesn't match this install's `plugin.json` version (or is missing, as in pre-0.3.3 builds), the probing process SIGTERMs the daemon, clears `.port`/`.pid`, and lets the next caller bind a fresh one. The user's open dashboard tab reconnects via SSE — no duplicate window. Plugin upgrades work end-to-end without any manual `swarmeq stop`. Identity is keyed on `version`, not `root`: Claude Code unpacks each session's plugins into a private `/tmp/claude-plugin-session-<hash>/` directory, so a team with N subagents has N distinct `CLAUDE_PLUGIN_ROOT` paths all pointing at the same install — root-based comparison (used through 0.3.5) made every subagent treat the daemon as foreign and SIGTERM it, producing a thrash loop that froze the dashboard.
 - **Heartbeat.** If two daemons race to start simultaneously (rare but possible), each runs a 5-second `setInterval` that reads `.pid`. Whichever wrote `.pid` last is the canonical owner; the loser notices the mismatch and SIGTERMs itself. Yields without zombies, never deletes the winner's files.
 
-## Team subagents and the catalog filter
+## Why we don't probe via an MCP tool call any more
 
-Claude Code Agent Teams rebuilds every team-subagent's tool catalog from the `tools` list declared in its agent-type definition (e.g. the `tools:` frontmatter in `.claude/agents/qa.md`). That rebuild silently ignores `--mcp-config` and `--strict-mcp-config` passed at the CLI — the catalog is whatever the type definition says it is, full stop. Adding `mcp__swarmeq__report` to every agent-type's `tools` list works but is the textbook PITA the user is trying to avoid.
+Through 0.4.x the probe asked the forked session to call `mcp__swarmeq__report`. That worked for lead sessions but failed for Agent Teams teammates because Claude Code rebuilds every teammate-session fork's tool catalog from the `tools:` list in its agent-type definition (e.g. the frontmatter of `.claude/agents/qa.md`). The fork passed `--mcp-config <inline> --strict-mcp-config --allowed-tools mcp__swarmeq__report`, and Claude Code spawned the inline MCP server alongside the fork — but the model's catalog post-filter still excluded the tool, and the model responded in prose ("the report tool is not in my toolset"). The 0.4.0/0.4.1 attempt to fix this by writing `mcpServers.swarmeq` into user-scope `~/.claude/settings.json` made the MCP server *load* in teammate forks (verified via process tree) but didn't restore the *tool* to the model's catalog — same wall, one layer down.
 
-The documented escape hatch is user-scope `~/.claude/settings.json`. From the Claude Code docs:
+0.5.0 changes the probe mechanism so the catalog filter is irrelevant. The fork no longer attempts a tool call. Instead the prompt instructs the model to emit one JSON object as its entire reply, schema-anchored and prose-suppressed:
 
-> "The `skills` and `mcpServers` frontmatter fields in a subagent definition are not applied when that definition runs as a teammate. Teammates load skills and MCP servers from your project and user settings, the same as a regular session."
+```
+[swarmeq introspection probe v2]
+…provenance preamble…
+Output exactly one JSON object on a single line. Begin with `{`, end with `}`.
+No prose before or after, no markdown fences, no tool calls.
 
-So MCP servers declared in `~/.claude/settings.json` `mcpServers` get loaded into every teammate's catalog. swarmeq writes that block automatically: the `SessionStart` hook's `autoInstall()` (added in 0.4.1) detects a missing entry on first run, backs up the prior file, atomically writes the new one, and emits a one-line stderr notice. Subsequent SessionStarts are silent no-ops (one stat + one JSON parse, no write). The `/swarmeq-install` slash command (added in 0.4.0) is retained as a manual reinstall path — useful after wiping settings or for users who want to install before the first session runs. Without either path the dashboard shows only the lead session; teammates register on `SessionStart` and probes fire, but `mcp__swarmeq__report` isn't in their catalog and the probe-fork model responds in prose ("the report tool is not in my toolset") instead of calling the tool. The diagnostic for that condition is `probe-no-report` in `state/probe.log`, with the model's prose response captured in `modelResult`. The dashboard also surfaces a banner (driven by `installNeeded` in `/state`) for the brief race window before the auto-install hook completes, or any edge case where it can't write.
+Schema: {"feelings":[{"label":…,"intensity":…},…],"note":"…"}
+```
+
+The probe parses the JSON out of `--output-format json`'s `result` field (tolerant of stray prose via a balanced-brace scan), injects `agent` from registry context (the model never sees or echoes it), validates via the existing `validateReport` schema, and writes via the same `record()` path that previously fielded MCP-tool calls. End-to-end the report still lands as `~/.claude/plugins/swarmeq/state/<agent>.json`. The MCP `report` tool is kept in `plugin.json` `mcpServers` as a public API surface — any session whose catalog includes it can still call it directly — but the probe no longer depends on it being callable.
+
+`probe-report-written` (SSE + probe.log) is the new "success" signal alongside `probe-no-report` (the "model didn't emit parseable JSON" diagnostic). `modelResult` is still captured on failure for prompt-tuning.
 
 The plugin's `plugin.json` `mcpServers` declaration is still needed — it's what makes the tool available to the **lead** session and to standalone use. The user-scope `settings.json` block is additive: it covers the teammate case the plugin manifest can't reach.
 
 ## Hooks at a glance
 
-- **`SessionStart`** — register the teammate in `registry.json`; auto-install `mcpServers.swarmeq` into `~/.claude/settings.json` if it's missing (idempotent — silent no-op once present); ensure the daemon is running. Never opens a browser — that's `/swarmeq-dashboard`'s job, since spawning N parallel teammates would otherwise open N browser tabs.
+- **`SessionStart`** — register the teammate in `registry.json`; ensure the daemon is running. Never opens a browser — that's `/swarmeq-dashboard`'s job, since spawning N parallel teammates would otherwise open N browser tabs.
 - **`Stop`** — auto-probe with the 90-second throttle; ensure the daemon is running.
 - **`SessionEnd`** — remove the teammate from `registry.json`; delete its `<agent>.json`.
 - **`SubagentStop`** — no-op. Task subagents aren't peer sessions; they can't be `--fork-session`-cloned the way peers can.

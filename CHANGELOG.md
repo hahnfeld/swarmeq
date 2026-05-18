@@ -1,5 +1,26 @@
 # swarmeq changelog
 
+## 0.5.0 — JSON-only fork probe; v0.4.x install path rolled back
+
+### Changed (breaking, in the architectural sense — user-visible surface only loses one slash command)
+- **Probe mechanism: the forked session no longer attempts to call an MCP tool.** Instead, the introspection prompt asks the model to emit a single-line JSON object matching the report schema. The probe parses that object, injects `agent` from registry context, validates via `validateReport`, and writes via the existing `record()` path. End-to-end the same `<agent>.json` files land in `state/`, but the dependency on `mcp__swarmeq__report` being callable inside the fork is gone. Concretely:
+  - `tools/src/probe.ts` drops `--mcp-config`, `--strict-mcp-config`, `--allowed-tools mcp__swarmeq__report` from the spawn args. Adds an `extractJsonObject()` helper (fast path for strict single-line JSON, balanced-brace fallback for prose-wrapped output). Replaces the `reportWrittenSince` post-close check with a JSON-parse → validate → `record()` pipeline. New SSE/log event `probe-report-written` is emitted on success.
+  - `tools/src/prompt.ts` rewritten as a "v2" prompt that leads with `[swarmeq introspection probe v2]` provenance (suppresses the prompt-injection defensive responses we saw under v1) and hard-locks the response to one JSON object. The `agentName` parameter is dropped — the model never sees or echoes the slug.
+- **Why this works for Agent Teams teammates.** The 0.3.x–0.4.x stack assumed `mcp__swarmeq__report` was callable inside the forked session. Agent Teams rebuilds every teammate-fork's tool catalog from the agent-type's `tools:` list (we confirmed this empirically — MCP server processes were spawned inside teammate forks but the tool was filtered out of the catalog). JSON-mode doesn't care what's in the catalog; the model just produces text.
+
+### Removed
+- `commands/swarmeq-install.md` slash command. Was needed to write `mcpServers.swarmeq` into user-scope `~/.claude/settings.json` so teammate forks could see the MCP tool — that strategy turned out to load the server but not surface the tool past the catalog filter. Now unnecessary because the probe doesn't call any tool. The 0.4.0/0.4.1 hook-based auto-install is also removed.
+- `tools/src/install.ts`, `tools/src/swarmeq.ts:cmdInstall`, the `install` subcommand of `swarmeq.mjs`, `installNeeded`/`installNeededSafe` plumbing in `tools/src/http.ts`, the SessionStart `autoInstall()` block in `tools/src/hooks/session-start.ts`, the `#install-banner` HTML/CSS/JS in `dashboard/dashboard.html`. All deleted.
+- Users who ran `/swarmeq-install` under 0.4.x can leave the `mcpServers.swarmeq` entry in `~/.claude/settings.json` — it's now ignored by the probe. Removing it manually has no effect on the dashboard. Plugin-manifest `mcpServers` still exposes the tool for any session whose catalog includes it (lead sessions, anyone hand-authoring a slash command body).
+
+### Added
+- `tools/test/probe.test.mjs` (renamed from `probe-no-report.test.mjs`): 16 cases covering strict + tolerant JSON extraction, validation rejection paths (bad label, intensity out of range, empty feelings), pure-prose `probe-no-report`, cwd plumbing carryover, and a guard test asserting `--mcp-config`/`--strict-mcp-config`/`--allowed-tools` never make it into the spawn args.
+
+### Updated
+- `docs/ARCHITECTURE.md` replaces the "Team subagents and the catalog filter" section with a "Why we don't probe via an MCP tool call any more" section explaining the 0.5.0 architecture.
+- `docs/agent-teams-catalog-filter-research-brief.md` gets a closing note that the catalog-filter wall is sidestepped (not solved) by JSON-mode, in case the brief gets reused for similar problems.
+- README setup section simplified — no install command to remember.
+
 ## 0.4.1 — auto-install on SessionStart + install-needed banner
 
 ### Added

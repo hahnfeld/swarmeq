@@ -52,18 +52,12 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.4.1.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.5.0.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
 
-### Agent Teams setup (auto-installed)
-
-For Claude Code Agent Teams teammates to call `mcp__swarmeq__report`, swarmeq's MCP server must be registered at user scope in `~/.claude/settings.json`. The plugin **auto-installs this entry on its first `SessionStart`** — you don't need to run anything. The hook backs up your prior settings file, atomically writes the new entry, and prints a one-line notice to stderr the one time it does the install. Subsequent sessions are silent no-ops.
-
-If you ever wipe your settings or need to reinstall manually, run `/swarmeq:swarmeq-install`. It's idempotent and equivalent to what the auto-install hook does.
-
-Why this is needed: Claude Code Agent Teams rebuilds every team-subagent's tool catalog from the static `tools` list in its agent-type definition and silently ignores `--mcp-config` passed at the CLI. Per the official docs, teammates load MCP servers from your project and user settings only — not from plugin manifests — so the user-scope settings.json block is the documented escape hatch. See `docs/ARCHITECTURE.md` for the deeper explanation.
+Teammate dashboards work out of the box — no per-agent config, no settings.json edit, no extra setup commands. The probe asks each agent for a JSON-shaped self-report (not an MCP tool call), so the tool catalog filter that Agent Teams applies to teammates is irrelevant. See `docs/ARCHITECTURE.md` for the deeper explanation if you're curious why this is the architecture.
 
 **From source** (for contributors):
 
@@ -134,7 +128,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.4.1
+## Status: 0.5.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 

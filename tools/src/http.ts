@@ -14,10 +14,9 @@ import type { SseEvent } from "./sse.ts";
 import { record, readLivingReports } from "./record.ts";
 import { startSweepTimer } from "./sweep.ts";
 import { computeSentiment, readSentimentHistory } from "./sentiment.ts";
-import { installNeeded } from "./install.ts";
 
 const ALLOWED_PROBE_EVENTS: ReadonlySet<SseEvent> = new Set<SseEvent>([
-  "probe-failed", "probe-exit", "probe-no-report", "model-mismatch",
+  "probe-failed", "probe-exit", "probe-no-report", "probe-report-written", "model-mismatch",
 ]);
 
 // Track which Server instances already have our handler attached, without
@@ -92,20 +91,7 @@ function snapshot() {
   // Living agents only: stale report files for vanished sessions never
   // contribute to the team view or per-agent tabs.
   const agents = readLivingReports();
-  return {
-    agents,
-    registry: readRegistry(),
-    sentiment: computeSentiment(agents),
-    installNeeded: installNeededSafe(),
-    ts: Date.now(),
-  };
-}
-
-// snapshot() runs on every /state and SSE broadcast; never let a
-// settings.json hiccup blow up dashboard refreshes. False on error
-// means we under-warn rather than display a banner that's not actionable.
-function installNeededSafe(): boolean {
-  try { return installNeeded(); } catch { return false; }
+  return { agents, registry: readRegistry(), sentiment: computeSentiment(agents), ts: Date.now() };
 }
 
 // Detached probe subprocesses POST their events here so SSE clients connected

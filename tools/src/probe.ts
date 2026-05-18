@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import path from "node:path";
-import { AGENT_FILE, PROBE_LOG_FILE, pluginRoot, readRegistry, writeAtomic } from "./paths.ts";
+import { PROBE_LOG_FILE, readRegistry, writeAtomic } from "./paths.ts";
 import type { RegistryEntry } from "./paths.ts";
 import { bindState, readActivePort } from "./bind.ts";
 import { broadcast } from "./sse.ts";
 import type { SseEvent } from "./sse.ts";
 import { introspectionPrompt } from "./prompt.ts";
+import { record } from "./record.ts";
 
 const PROBE_TIMEOUT_MS = 30_000;
 const LOG_ROTATE_BYTES = 1024 * 1024;
@@ -81,16 +81,15 @@ export async function startProbe(agent: string): Promise<void> {
     : (process.env.ANTHROPIC_MODEL || "sonnet");
   const model = unmangleModel(rawModel);
 
-  const mcpConfig = JSON.stringify({
-    mcpServers: {
-      swarmeq: {
-        command: "node",
-        args: [path.join(pluginRoot(), "server", "swarmeq.mjs"), "mcp"],
-      },
-    },
-  });
   const settingsJson = JSON.stringify({ model });
 
+  // No --mcp-config / --strict-mcp-config / --allowed-tools: the JSON-only
+  // probe (0.5.0+) doesn't ask the model to call any tool, so the forked
+  // session's tool catalog doesn't matter. Removing these flags is what
+  // unblocks Agent Teams teammates — the per-agent-type `tools:` filter
+  // used to strip our MCP tool from forked-resume sessions, but the new
+  // prompt just asks for a single JSON line, which any model can emit
+  // regardless of catalog. The lead works under the same path too.
   const args = [
     "--resume", sid,
     "--fork-session",
@@ -98,15 +97,11 @@ export async function startProbe(agent: string): Promise<void> {
     "--print",
     "--model", model,
     "--output-format", "json",
-    "--mcp-config", mcpConfig,
-    "--strict-mcp-config",
-    "--allowed-tools", "mcp__swarmeq__report",
     "--settings", settingsJson,
-    "-p", introspectionPrompt(agent),
+    "-p", introspectionPrompt(),
   ];
 
   const BUF_CAP = 128 * 1024; // 128KB per stream — plenty for a single probe result, prevents OOM
-  const startedAt = Date.now();
   // `claude --resume <sid>` only finds the JSONL when the spawn's CWD maps
   // to the same project directory that recorded the session. Without this,
   // the probe inherits the daemon's CWD (typically the dir the user ran
@@ -145,7 +140,7 @@ export async function startProbe(agent: string): Promise<void> {
       reject(err);
     });
 
-    child.once("close", (code: number | null) => {
+    child.once("close", async (code: number | null) => {
       cleanup();
       logProbe(agent, "probe-exit", {
         code,
@@ -166,9 +161,9 @@ export async function startProbe(agent: string): Promise<void> {
         logProbe(agent, "probe-failed", { reason });
         return reject(new Error(reason));
       }
-      // Parse the JSON envelope once: used for model-pin verification AND
-      // for the probe-no-report diagnostic below. Non-JSON output is fine —
-      // both branches degrade to "skip the check" silently.
+      // Parse the JSON envelope once: used for the model-pin check AND for
+      // extracting the JSON report from envelope.result. Non-JSON envelope
+      // output is fine — both branches degrade gracefully.
       let envelope: { model?: string; system?: { model?: string }; init?: { model?: string }; result?: unknown } | null = null;
       try { envelope = JSON.parse(stdout); } catch { /* not JSON, that's ok */ }
       if (envelope) {
@@ -177,31 +172,76 @@ export async function startProbe(agent: string): Promise<void> {
           logProbe(agent, "model-mismatch", { expected: model, got });
         }
       }
-      // Bug 2 surface: forked Claude sometimes exits cleanly without ever
-      // invoking mcp__swarmeq__report (frozen tool catalog suspected). If
-      // AGENT_FILE wasn't touched during this probe, the run was a silent
-      // no-op — log it, plus the model's actual prose response, so we can
-      // distinguish "didn't see the tool" from "saw the tool but refused".
-      if (!reportWrittenSince(agent, startedAt)) {
-        const modelResult = typeof envelope?.result === "string"
-          ? envelope.result.slice(0, 1000)
-          : "";
-        logProbe(agent, "probe-no-report", {
-          reason: "claude exited 0 but no report was written",
-          modelResult,
-          stdoutTail: stdout.slice(-500),
-        });
+      // JSON-only probe (0.5.0+): the prompt asks the model to emit a single
+      // JSON object as its entire reply (which `--output-format json` puts in
+      // envelope.result). Extract it, inject `agent` from probe context (we
+      // don't trust the model to echo it correctly), validate via the
+      // existing schema, and ingest through record(). The previous mechanism
+      // (call mcp__swarmeq__report) fell apart on Agent Teams teammates
+      // because --strict-mcp-config + the per-agent-type tools filter
+      // stripped the tool from the forked-resume catalog. JSON-mode doesn't
+      // care what's in the catalog.
+      if (envelope && typeof envelope.result === "string") {
+        const parsed = extractJsonObject(envelope.result);
+        if (parsed) {
+          parsed.agent = agent;
+          try {
+            await record(parsed);
+            logProbe(agent, "probe-report-written", { source: "json" });
+            return resolve();
+          } catch (err) {
+            logProbe(agent, "probe-no-report", {
+              reason: `validation failed: ${(err as Error).message}`,
+              modelResult: envelope.result.slice(0, 1000),
+              stdoutTail: stdout.slice(-500),
+            });
+            return resolve();
+          }
+        }
       }
+      const modelResult = typeof envelope?.result === "string"
+        ? envelope.result.slice(0, 1000)
+        : "";
+      logProbe(agent, "probe-no-report", {
+        reason: "no parseable JSON object in model response",
+        modelResult,
+        stdoutTail: stdout.slice(-500),
+      });
       resolve();
     });
   });
 }
 
-function reportWrittenSince(agent: string, sinceMs: number): boolean {
-  try {
-    const stat = fs.statSync(AGENT_FILE(agent));
-    return stat.mtimeMs >= sinceMs;
-  } catch { return false; }
+// Tolerant JSON extractor: fast path for a strictly-formatted reply, plus a
+// balanced-brace fallback for models that wrap their JSON in prose anyway.
+// Bounded by the BUF_CAP cap on stdout (128KB), so the scan is cheap.
+export function extractJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const p = JSON.parse(trimmed);
+      if (p && typeof p === "object" && !Array.isArray(p)) return p as Record<string, unknown>;
+    } catch { /* fall through to balanced-brace scan */ }
+  }
+  const start = trimmed.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < trimmed.length; i++) {
+    const c = trimmed[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) {
+      try {
+        const p = JSON.parse(trimmed.slice(start, i + 1));
+        if (p && typeof p === "object" && !Array.isArray(p)) return p as Record<string, unknown>;
+      } catch { /* invalid JSON inside the braces, give up */ }
+      return null;
+    }
+  }
+  return null;
 }
 
 function lookupAgent(agent: string): RegistryEntry | null {
@@ -209,4 +249,4 @@ function lookupAgent(agent: string): RegistryEntry | null {
 }
 
 // Exported for tests.
-export const _internals = { unmangleModel, logProbe, reportWrittenSince, rotateIfLarge };
+export const _internals = { unmangleModel, logProbe, extractJsonObject, rotateIfLarge };

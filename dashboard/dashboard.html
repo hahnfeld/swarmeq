@@ -266,35 +266,6 @@
     padding: 1px 7px; border-radius: 5px;
   }
 
-  /* ─── Install banner (shown only when ~/.claude/settings.json lacks
-        mcpServers.swarmeq — i.e. Agent Teams teammates can't probe yet) ── */
-  .install-banner {
-    margin: 16px 32px 0;
-    padding: 14px 18px;
-    border: 1px solid color-mix(in srgb, var(--warn, #d97706) 35%, var(--line));
-    background: color-mix(in srgb, var(--warn, #d97706) 8%, var(--bg-1));
-    border-radius: 8px;
-    font-family: var(--display); font-weight: 300;
-    color: var(--text);
-  }
-  .install-banner[hidden] { display: none; }
-  .install-banner-inner { display: flex; gap: 14px; align-items: flex-start; }
-  .install-banner-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; flex: 0 0 22px;
-    border-radius: 50%; font-family: var(--display); font-weight: 600;
-    font-size: 13px; line-height: 1;
-    background: var(--warn, #d97706); color: #fff;
-  }
-  .install-banner-text { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; line-height: 1.5; }
-  .install-banner-text strong { font-family: var(--display); font-weight: 500; color: var(--text); }
-  .install-banner-text span { color: var(--text-2); }
-  .install-banner code {
-    font-family: var(--mono); font-size: 12px;
-    color: var(--text);
-    background: var(--bg-1); border: 1px solid var(--line);
-    padding: 1px 6px; border-radius: 4px;
-  }
 
   /* ─── Portrait stage (the shot) ──────────────────────────────── */
   .stage {
@@ -639,19 +610,6 @@
     <span id="live" class="live"><span class="pip"></span>connecting</span>
   </div>
 
-  <!-- Auto-installs on first SessionStart but the writer/reader race means
-       it may briefly be absent on the very first dashboard load. The hook
-       silently corrects it; this banner is the safety net. -->
-  <div id="install-banner" class="install-banner" hidden>
-    <div class="install-banner-inner">
-      <span class="install-banner-icon" aria-hidden="true">!</span>
-      <div class="install-banner-text">
-        <strong>One-time setup needed for Agent Teams.</strong>
-        <span>Claude Code Agent Teams teammates can't see <code>mcp__swarmeq__report</code> until your user-scope <code>~/.claude/settings.json</code> has the swarmeq <code>mcpServers</code> entry. The plugin auto-installs this on session start — if you're seeing this banner, restart your active Claude Code sessions so the auto-install hook can run. Or run <code>/swarmeq:swarmeq-install</code> manually.</span>
-      </div>
-    </div>
-  </div>
-
   <div class="team" id="team"></div>
 
   <div id="empty" class="empty" hidden>
@@ -896,10 +854,6 @@ async function refreshState() {
     store.agents = d.agents || {};
     store.registry = d.registry || {};
     if (d.sentiment) store.sentiment = d.sentiment;
-    // Banner toggle: only flip visibility, don't rerender content.
-    // The auto-install hook should clear this within one SessionStart.
-    const banner = document.getElementById("install-banner");
-    if (banner) banner.hidden = !d.installNeeded;
     // If the currently-selected agent went away, fall back to the first one.
     if (store.active && !store.agents[store.active]) {
       store.active = Object.keys(store.agents)[0] || null;
