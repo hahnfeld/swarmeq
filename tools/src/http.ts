@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { dashboardFile, feelingsFile, pluginRoot, pluginVersion, readRegistry } from "./paths.ts";
+import { dashboardFile, feelingsFile, iweFile, pluginRoot, pluginVersion, readRegistry } from "./paths.ts";
 
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -43,6 +43,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
     const pn = u.pathname;
     if (req.method === "GET" && (pn === "/" || pn === "/index.html" || pn === "/team")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
     if (req.method === "GET" && pn === "/feelings.json")               return serveFile(res, feelingsFile(), "application/json");
+    if (req.method === "GET" && pn === "/iwe.json")                    return serveFile(res, iweFile(), "application/json");
     if (req.method === "GET" && pn === "/events")                      return addClient(req, res);
     if (req.method === "GET" && pn === "/state")                       return serveJSON(res, snapshot());
     if (req.method === "GET" && pn === "/healthz")                     return serveJSON(res, { service: "swarmeq", pid: process.pid, version: pluginVersion(), root: pluginRoot() });

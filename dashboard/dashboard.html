@@ -278,6 +278,85 @@
   }
   .stage[hidden] { display: none; }
 
+  /* Source-material credit lines (under the wheel; under the IWE panel).
+     Same size/tone family so they read together as attributions, not
+     UI chrome. */
+  .wheel-credit {
+    margin: 12px 0 0;
+    font-family: var(--display); font-size: 10px; line-height: 1.5;
+    color: var(--text-4); text-align: center;
+  }
+  .wheel-credit em { font-family: var(--serif); font-style: italic; }
+
+  /* ─── Intrinsic Work Experience panel (per-agent, below readout) ─ */
+  .iwe-panel {
+    grid-column: 1 / -1;
+    margin-top: 56px;
+    padding: 32px 0 0;
+    border-top: 1px solid var(--line);
+    font-family: var(--display);
+  }
+  .iwe-panel[hidden] { display: none; }
+  .iwe-panel .crumb {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-3); letter-spacing: 0.01em;
+    margin: 0 0 24px;
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .iwe-overall {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-2); letter-spacing: 0.04em;
+  }
+  .iwe-overall[hidden] { display: none; }
+  .iwe-overall .value {
+    color: var(--c-peaceful); font-weight: 600; font-size: 13px;
+    margin-right: 4px;
+  }
+  .iwe-items { display: flex; flex-direction: column; gap: 4px; }
+  .iwe-item {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 180px 28px;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 0;
+  }
+  .iwe-item + .iwe-item { border-top: 1px solid var(--line); }
+  .iwe-item.skipped { opacity: 0.45; }
+  .iwe-item .qn {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--text-3); text-align: right; letter-spacing: 0.04em;
+  }
+  .iwe-item .qtext {
+    font-family: var(--display); font-size: 12.5px;
+    color: var(--text-2); line-height: 1.4;
+    overflow-wrap: break-word;
+  }
+  .iwe-item .iwe-bar {
+    position: relative;
+    height: 6px;
+    background: var(--bg-1);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .iwe-item .iwe-bar .fill {
+    position: absolute; inset: 0 auto 0 0;
+    background: var(--c-peaceful);
+    border-radius: 3px;
+    transition: width 360ms ease;
+  }
+  .iwe-item .iwe-value {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-2); text-align: right;
+  }
+  .iwe-credit {
+    margin: 28px 0 0;
+    font-family: var(--display); font-size: 10px; line-height: 1.55;
+    color: var(--text-4);
+    max-width: 760px;
+  }
+  .iwe-credit a { color: var(--text-3); text-decoration: underline; text-decoration-color: var(--line); }
+
   /* ─── Wheel (the hero) ───────────────────────────────────────── */
   .wheel-bay {
     aspect-ratio: 1;
@@ -668,6 +747,11 @@
         </g>
       </svg>
       <div class="wheel-emoji" id="wheel-emoji" aria-hidden="true">·</div>
+      <p class="wheel-credit">
+        Feelings wheel after Willcox, G. (1982),
+        "The Feelings Wheel,"
+        <em>Transactional Analysis Journal</em> 12(4): 274–276.
+      </p>
     </div>
 
     <div class="readout">
@@ -686,6 +770,24 @@
         <span class="age" id="m-age">—</span>
       </p>
     </div>
+
+    <section id="iwe" class="iwe-panel" hidden>
+      <p class="crumb">
+        <span id="iwe-name">—</span> · intrinsic work experience
+        <span class="iwe-overall" id="iwe-overall" aria-label="percent positive"></span>
+      </p>
+      <div class="iwe-items" id="iwe-items"></div>
+      <p class="iwe-credit">
+        Intrinsic Work Experience items 1–4 verbatim from the
+        U.S. Office of Personnel Management's Federal Employee Viewpoint Survey (FEVS),
+        Employee Engagement Index, Intrinsic Work Experience Sub-Index, as published in the
+        <a href="https://www.opm.gov/fevs/" target="_blank" rel="noopener">2023 FEVS Technical Report</a> (Revised April 2025), p. 13.
+        Item 5 adapted for the AI-agent context: "agency's" → "the user's"
+        (original FEVS Q7: "I know how my work relates to the agency's goals.").
+        The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105).
+        Sub-index score follows the FEVS method: percent-positive (rating ≥ 4) averaged across rated items.
+      </p>
+    </section>
   </section>
 
   <section id="team-stage" class="team-stage" hidden>
@@ -809,6 +911,7 @@ function faceSvg(label) {
 
 const store = {
   feelings: null,
+  iwe: null,
   agents: {},
   registry: {},
   active: null,
@@ -828,9 +931,14 @@ const displayNameFor = slug => (store.registry?.[slug]?.display_name) || slug;
 async function init() {
   const fres = await fetch("/feelings.json");
   store.feelings = await fres.json();
+  try {
+    const ires = await fetch("/iwe.json");
+    store.iwe = ires.ok ? await ires.json() : null;
+  } catch { store.iwe = null; }
   patchColors();
   buildWheel();
   buildTeamWheel();
+  buildIwe();
   await refreshState();
   await loadHistory();
   connectSSE();
@@ -1145,6 +1253,83 @@ function renderActive() {
   $("wheel-emoji").innerHTML = faceSvg(dom ? dom.label.toLowerCase() : "peaceful");
 
   $("m-age").textContent = ageLabel(r.ts);
+  renderIwe();
+}
+
+// Build the static structure of the IWE panel once at startup. Each
+// item's bar is rendered empty; renderIwe() fills it later based on the
+// active agent's iwe ratings.
+function buildIwe() {
+  if (!store.iwe) return;
+  const wrap = $("iwe-items");
+  if (!wrap) return;
+  wrap.replaceChildren();
+  for (const it of store.iwe.items) {
+    const row = document.createElement("div");
+    row.className = "iwe-item skipped";
+    row.dataset.qn = String(it.n);
+    const num = document.createElement("span");
+    num.className = "qn"; num.textContent = String(it.n);
+    const text = document.createElement("span");
+    text.className = "qtext"; text.textContent = it.text;
+    const bar = document.createElement("span");
+    bar.className = "iwe-bar";
+    const fill = document.createElement("span");
+    fill.className = "fill"; fill.style.width = "0%";
+    bar.appendChild(fill);
+    const val = document.createElement("span");
+    val.className = "iwe-value"; val.textContent = "—";
+    row.append(num, text, bar, val);
+    wrap.appendChild(row);
+  }
+}
+
+// Fill the per-item bars based on the active agent's iwe ratings.
+// Missing keys mean the agent skipped that item this round → dim row,
+// empty bar, em-dash for value. Overall score follows the FEVS method:
+// percent-positive (rating ≥ 4) averaged across rated items. For a
+// single agent's single probe this reduces to positiveCount / ratedCount.
+function renderIwe() {
+  const panel = $("iwe");
+  if (!panel) return;
+  if (!store.iwe) { panel.hidden = true; return; }
+  const r = store.agents[store.active];
+  if (!r) { panel.hidden = true; return; }
+  panel.hidden = false;
+  $("iwe-name").textContent = displayNameFor(store.active);
+  const ratings = (r.iwe && typeof r.iwe === "object" && !Array.isArray(r.iwe)) ? r.iwe : {};
+  let rated = 0, positive = 0;
+  for (const row of panel.querySelectorAll(".iwe-item")) {
+    const qn = row.dataset.qn;
+    const v = ratings[qn];
+    const fill = row.querySelector(".fill");
+    const val = row.querySelector(".iwe-value");
+    if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1 && v <= 5) {
+      row.classList.remove("skipped");
+      fill.style.width = `${(v / 5) * 100}%`;
+      val.textContent = String(v);
+      rated += 1;
+      if (v >= 4) positive += 1;
+    } else {
+      row.classList.add("skipped");
+      fill.style.width = "0%";
+      val.textContent = "—";
+    }
+  }
+  const overall = $("iwe-overall");
+  if (overall) {
+    if (rated > 0) {
+      const pct = Math.round((positive / rated) * 100);
+      overall.replaceChildren();
+      const v = document.createElement("span"); v.className = "value";
+      v.textContent = `${pct}%`;
+      const lab = document.createTextNode("positive");
+      overall.append(v, lab);
+      overall.hidden = false;
+    } else {
+      overall.hidden = true;
+    }
+  }
 }
 
 function arcPath(innerR, outerR, a0, a1) {

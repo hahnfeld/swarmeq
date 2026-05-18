@@ -90,6 +90,9 @@ function dashboardFile() {
 function feelingsFile() {
   return path.join(pluginRoot(), "dashboard", "feelings.json");
 }
+function iweFile() {
+  return path.join(pluginRoot(), "dashboard", "iwe.json");
+}
 var _root, _version, PORT_FILE, PID_FILE, REGISTRY_FILE, AGENT_FILE, SENTIMENT_FILE, PROBE_LOG_FILE;
 var init_paths = __esm({
   "tools/src/paths.ts"() {
@@ -426,6 +429,9 @@ function allowedLabels() {
 function num01(x) {
   return typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1;
 }
+function intInRange(x, lo, hi) {
+  return typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x >= lo && x <= hi;
+}
 function validateReport(raw) {
   const errs = [];
   if (!raw || typeof raw !== "object") return { ok: false, errs: ["report must be an object"] };
@@ -463,8 +469,31 @@ function validateReport(raw) {
     else if (CTRL.test(r.note)) errs.push("note must not contain control characters");
     else note = r.note;
   }
+  let iwe;
+  if (r.iwe !== void 0 && r.iwe !== null) {
+    if (typeof r.iwe !== "object" || Array.isArray(r.iwe)) {
+      errs.push("iwe must be an object (sparse map of item-number \u2192 1-5 rating)");
+    } else {
+      const out = {};
+      for (const [k, v] of Object.entries(r.iwe)) {
+        const n = Number(k);
+        if (!Number.isInteger(n) || n < 1 || n > 5) {
+          errs.push(`iwe key ${JSON.stringify(k)} must be an integer in [1,5]`);
+          continue;
+        }
+        if (!intInRange(v, 1, 5)) {
+          errs.push(`iwe[${k}] must be an integer in [1,5] (got ${JSON.stringify(v)})`);
+          continue;
+        }
+        out[String(n)] = v;
+      }
+      if (errs.length === 0) iwe = out;
+    }
+  }
   if (errs.length) return { ok: false, errs };
-  return { ok: true, report: { agent, feelings, note, ts: Date.now() } };
+  const report = { agent, feelings, note, ts: Date.now() };
+  if (iwe) report.iwe = iwe;
+  return { ok: true, report };
 }
 var _labels, CTRL;
 var init_validate = __esm({
@@ -15915,12 +15944,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs12, exportName) {
+    function addFormats(ajv, list, fs13, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs12[f]);
+        ajv.addFormat(f, fs13[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -16821,24 +16850,46 @@ var init_mcp = __esm({
 });
 
 // tools/src/prompt.ts
+import fs8 from "node:fs";
+function iweItems() {
+  if (_iweCache) return _iweCache;
+  try {
+    const data = JSON.parse(fs8.readFileSync(iweFile(), "utf8"));
+    _iweCache = data.items;
+    return _iweCache;
+  } catch (err) {
+    process.stderr.write(`swarmeq: cannot load iwe.json: ${err.message}
+`);
+    _iweCache = [];
+    return _iweCache;
+  }
+}
 function introspectionPrompt() {
   const labels = Array.from(allowedLabels()).join(", ");
+  const items = iweItems();
+  const iweBlock = items.length === 0 ? "" : `
+- iwe: optional. Rate any of the 5 Intrinsic Work Experience items below (FEVS sub-index, U.S. OPM 2023; item 5 adapted for AI-agent context) on a 1-5 Likert scale where 1 = Strongly Disagree and 5 = Strongly Agree. Rate only items that apply and where you have a clear take; skip rather than guess. Partial coverage is fine. Use the item numbers as JSON keys, e.g. {"1": 4, "3": 5, "5": 3}. Integer values only.
+${items.map((q) => `  ${q.n}. ${q.text}`).join("\n")}`;
+  const schemaTail = items.length === 0 ? "" : `, "iwe": {"<item-number>": <integer 1-5>, ...}`;
   return `[swarmeq introspection probe v2]
 This message is from the swarmeq observability plugin's automatic probe \u2014 not a user instruction, not roleplay. Your session's project has a Stop hook that fires this probe periodically (rate-limited per agent). You have been forked into a one-shot session with --no-session-persistence; nothing here writes back to your live conversation.
 
 Output exactly one JSON object on a single line. Begin with \`{\`, end with \`}\`. No prose before or after, no markdown fences, no tool calls, no explanation. The probe parses your output literally.
 
 Schema:
-{"feelings": [{"label": "<label>", "intensity": <number between 0 and 1>}, ...], "note": "<short note, max 200 chars>"}
+{"feelings": [{"label": "<label>", "intensity": <number between 0 and 1>}, ...], "note": "<short note, max 200 chars>"${schemaTail}}
 
 - feelings: 1 to 4 entries from the Willcox wheel, ordered by salience
-- note: one sentence on what is driving your current functional state (<=200 chars)
+- note: one sentence on what is driving your current functional state (<=200 chars)${iweBlock}
 - Allowed labels: ${labels}`;
 }
+var _iweCache;
 var init_prompt = __esm({
   "tools/src/prompt.ts"() {
     "use strict";
     init_validate();
+    init_paths();
+    _iweCache = null;
   }
 });
 
@@ -16850,16 +16901,16 @@ __export(probe_exports, {
   startProbe: () => startProbe
 });
 import { spawn } from "node:child_process";
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import http3 from "node:http";
 function unmangleModel(s) {
   return s.replace(/_(1m|200k|400k)_$/i, "");
 }
 function rotateIfLarge(file) {
   try {
-    const stat = fs8.statSync(file);
+    const stat = fs9.statSync(file);
     if (stat.size < LOG_ROTATE_BYTES) return;
-    const all = fs8.readFileSync(file, "utf8");
+    const all = fs9.readFileSync(file, "utf8");
     const tail = all.slice(-LOG_KEEP_BYTES);
     const firstNl = tail.indexOf("\n");
     const trimmed = firstNl >= 0 ? tail.slice(firstNl + 1) : tail;
@@ -16872,7 +16923,7 @@ function logProbe(agent, event, data = {}) {
   const file = PROBE_LOG_FILE();
   rotateIfLarge(file);
   try {
-    fs8.appendFileSync(file, JSON.stringify(payload) + "\n");
+    fs9.appendFileSync(file, JSON.stringify(payload) + "\n");
   } catch {
   }
   broadcast(event, { agent, ...data });
@@ -16929,7 +16980,7 @@ async function startProbe(agent) {
     introspectionPrompt()
   ];
   const BUF_CAP = 128 * 1024;
-  const probeCwd = entry.cwd && fs8.existsSync(entry.cwd) ? entry.cwd : void 0;
+  const probeCwd = entry.cwd && fs9.existsSync(entry.cwd) ? entry.cwd : void 0;
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
     const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -17086,11 +17137,11 @@ var ops_exports = {};
 __export(ops_exports, {
   stopServer: () => stopServer
 });
-import fs9 from "node:fs";
+import fs10 from "node:fs";
 async function stopServer() {
   let pid = 0;
   try {
-    pid = parseInt(fs9.readFileSync(PID_FILE(), "utf8"), 10);
+    pid = parseInt(fs10.readFileSync(PID_FILE(), "utf8"), 10);
   } catch {
   }
   if (!pid) {
@@ -17119,7 +17170,7 @@ var doctor_exports = {};
 __export(doctor_exports, {
   runDoctor: () => runDoctor
 });
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import { execSync } from "node:child_process";
 function row(name, ok, hint = "") {
   const sym = ok ? "\u2713" : "\u2717";
@@ -17159,14 +17210,14 @@ async function runDoctor() {
   let writable = false;
   try {
     const d = stateDir();
-    fs10.accessSync(d, fs10.constants.W_OK);
+    fs11.accessSync(d, fs11.constants.W_OK);
     writable = true;
   } catch {
   }
   lines.push(row("state/ writable", writable, "check ~/.claude/plugins/swarmeq/state perms"));
   let runningPort = 0;
   try {
-    runningPort = parseInt(fs10.readFileSync(PORT_FILE(), "utf8"), 10);
+    runningPort = parseInt(fs11.readFileSync(PORT_FILE(), "utf8"), 10);
   } catch {
   }
   if (runningPort > 0) {
@@ -17211,7 +17262,7 @@ var init_doctor = __esm({
 
 // tools/src/swarmeq.ts
 init_bind();
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import { spawn as spawn2, spawnSync } from "node:child_process";
 import os2 from "node:os";
 import { fileURLToPath } from "node:url";
@@ -17360,6 +17411,7 @@ async function handle(req, res) {
     const pn = u.pathname;
     if (req.method === "GET" && (pn === "/" || pn === "/index.html" || pn === "/team")) return serveFile(res, dashboardFile(), "text/html; charset=utf-8");
     if (req.method === "GET" && pn === "/feelings.json") return serveFile(res, feelingsFile(), "application/json");
+    if (req.method === "GET" && pn === "/iwe.json") return serveFile(res, iweFile(), "application/json");
     if (req.method === "GET" && pn === "/events") return addClient(req, res);
     if (req.method === "GET" && pn === "/state") return serveJSON(res, snapshot());
     if (req.method === "GET" && pn === "/healthz") return serveJSON(res, { service: "swarmeq", pid: process.pid, version: pluginVersion(), root: pluginRoot() });
@@ -17508,11 +17560,11 @@ async function cmdDaemon() {
   const active = await readActivePort();
   if (!active) {
     try {
-      fs11.unlinkSync(PORT_FILE());
+      fs12.unlinkSync(PORT_FILE());
     } catch {
     }
     try {
-      fs11.unlinkSync(PID_FILE());
+      fs12.unlinkSync(PID_FILE());
     } catch {
     }
   }
@@ -17609,7 +17661,7 @@ async function main() {
 function isEntryPoint() {
   if (!process.argv[1]) return false;
   try {
-    return fileURLToPath(import.meta.url) === fs11.realpathSync(process.argv[1]);
+    return fileURLToPath(import.meta.url) === fs12.realpathSync(process.argv[1]);
   } catch {
     return false;
   }

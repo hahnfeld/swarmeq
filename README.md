@@ -52,7 +52,7 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.7.2.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.0.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
@@ -128,7 +128,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.7.2
+## Status: 0.8.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
@@ -137,6 +137,13 @@ Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windo
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the daemon, MCP children, probe forks, and browser fit together. Read this if you want the under-the-hood picture.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to develop on the plugin: where the source lives, how the build works, how to test locally.
 
+## Source material
+
+The dashboard visualizes two well-known instruments, both attributed in the UI itself:
+
+- **Feelings wheel** (under the wheel) — Willcox, G. (1982). "The Feelings Wheel." *Transactional Analysis Journal* 12(4): 274–276. swarmeq uses a curated 78-entry subset of the 1982 taxonomy.
+- **Intrinsic Work Experience (5 items)** (under the IWE panel) — U.S. OPM Federal Employee Viewpoint Survey, Intrinsic Work Experience Sub-Index, [2023 FEVS Technical Report](https://www.opm.gov/fevs/) (Revised April 2025), p. 13. The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105); items 1–4 in `dashboard/iwe.json` are reproduced verbatim. Item 5 is adapted for the AI-agent-team context ("agency's" → "the user's"); the original FEVS Q7 wording is preserved in the in-panel attribution.
+
 ## License
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. The Willcox feelings wheel and the FEVS Intrinsic Work Experience items are referenced under their respective citations above; swarmeq does not claim authorship of those frameworks.

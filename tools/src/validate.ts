@@ -6,11 +6,21 @@ export interface Feeling {
   intensity: number;
 }
 
+// Sparse map of FEVS Intrinsic Work Experience item number (as string key,
+// "1" to "5") to a 1-5 integer Likert rating (1 = Strongly Disagree,
+// 5 = Strongly Agree). Optional on the report and optional per-item:
+// agents skip rather than fabricate. Added in 0.8.0. The items themselves
+// are from a U.S. Government work in the public domain (17 U.S.C. § 105);
+// see dashboard/iwe.json for the canonical text and OPM 2023 FEVS
+// Technical Report p. 13 for the source.
+export interface IweRatings { [n: string]: number; }
+
 export interface Report {
   agent: string;
   feelings: Feeling[];
   note: string;
   ts: number;
+  iwe?: IweRatings;
 }
 
 export type ValidationResult =
@@ -40,6 +50,9 @@ export function allowedLabels(): Set<string> {
 }
 
 function num01(x: unknown): x is number { return typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1; }
+function intInRange(x: unknown, lo: number, hi: number): x is number {
+  return typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x >= lo && x <= hi;
+}
 const CTRL = /[\x00-\x1f\x7f]/;
 
 export function validateReport(raw: unknown): ValidationResult {
@@ -80,6 +93,35 @@ export function validateReport(raw: unknown): ValidationResult {
     else note = r.note;
   }
 
+  // iwe (optional, 0.8.0+): FEVS Intrinsic Work Experience ratings. Sparse
+  // object keyed by item number "1"-"5" with integer values 1-5 (Likert:
+  // 1 = Strongly Disagree, 5 = Strongly Agree). Missing keys mean the
+  // agent skipped that item this round. An empty `{}` is valid; null and
+  // arrays are not.
+  let iwe: IweRatings | undefined;
+  if (r.iwe !== undefined && r.iwe !== null) {
+    if (typeof r.iwe !== "object" || Array.isArray(r.iwe)) {
+      errs.push("iwe must be an object (sparse map of item-number → 1-5 rating)");
+    } else {
+      const out: IweRatings = {};
+      for (const [k, v] of Object.entries(r.iwe as Record<string, unknown>)) {
+        const n = Number(k);
+        if (!Number.isInteger(n) || n < 1 || n > 5) {
+          errs.push(`iwe key ${JSON.stringify(k)} must be an integer in [1,5]`);
+          continue;
+        }
+        if (!intInRange(v, 1, 5)) {
+          errs.push(`iwe[${k}] must be an integer in [1,5] (got ${JSON.stringify(v)})`);
+          continue;
+        }
+        out[String(n)] = v;
+      }
+      if (errs.length === 0) iwe = out;
+    }
+  }
+
   if (errs.length) return { ok: false, errs };
-  return { ok: true, report: { agent, feelings, note, ts: Date.now() } };
+  const report: Report = { agent, feelings, note, ts: Date.now() };
+  if (iwe) report.iwe = iwe;
+  return { ok: true, report };
 }

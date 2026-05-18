@@ -85,6 +85,16 @@ Why argv and not the SessionStart event stdin: Claude Code's SessionStart event 
 
 `display_name` is what the dashboard tiles and the active-portrait label render. Teammates show as `<agent-name>@<team-name>` (e.g. `qa@pocketweather-mood`); leads show as `lead@<cwd-basename>` (e.g. `lead@fun_team`) which mirrors the teammate shape and lets you tell parallel leads in different projects apart at a glance.
 
+## Intrinsic Work Experience (IWE)
+
+Added in 0.8.0, alongside the affective (Willcox feelings) signal. Each probe asks the agent to optionally rate the 5 items of the U.S. OPM FEVS Intrinsic Work Experience Sub-Index on a 1–5 Likert scale (1 = Strongly Disagree, 5 = Strongly Agree). The FEVS is a U.S. Government work in the public domain (17 U.S.C. § 105), so items 1–4 are reproduced verbatim. Item 5 — "I know how my work relates to the agency's goals" — is adapted for the AI-agent context: "agency's" → "the user's"; the original is preserved in the in-panel attribution.
+
+Schema-wise this is a single optional `iwe?: Record<string, number>` field on `Report`, keyed by item number ("1"–"5") with integer values 1–5. Missing keys mean the agent skipped that item this round; missing `iwe` entirely means the agent didn't answer any (or pre-dates 0.8.0). The validator (`tools/src/validate.ts`) rejects out-of-range keys, non-integer values, arrays, and null shapes; everything else is additive over the pre-0.8.0 schema.
+
+Item text lives in `dashboard/iwe.json` so the probe prompt builder (`tools/src/prompt.ts`) and the dashboard renderer share a single source of truth — same pattern as `feelings.json`. The daemon serves `/iwe.json` as a static route. The dashboard fetches it once at startup, builds the panel structure (`buildIwe()`), and `renderIwe()` then fills per-item bars based on the active agent's `report.iwe`. The **overall sub-index score follows the FEVS method**: percent-positive (rating ≥ 4) averaged across rated items. For a single agent's single probe this reduces to `positiveCount / ratedCount`, displayed inline with the panel crumb as `NN% positive`.
+
+Source: U.S. OPM 2023 FEVS Technical Report (Revised April 2025), p. 13 (sub-index definition) and pp. 50–51 Appendix A Table A2 (verbatim item wording). Attribution appears in-panel on the dashboard; the README's "Source material" section has the full citation.
+
 ## Hooks at a glance
 
 - **`SessionStart`** — register the teammate in `registry.json` and capture human-readable identity (`display_name`, `agent_type`, `team_name`, `parent_session_id`) by parsing the parent claude process's argv for `--agent-name` / `--team-name` / `--agent-type` / `--parent-session-id`. Lead sessions (no `--agent-id` on parent argv) fall back to `lead@<cwd-basename>`. Ensures the daemon is running. Never opens a browser — that's `/swarmeq-dashboard`'s job, since spawning N parallel teammates would otherwise open N browser tabs.

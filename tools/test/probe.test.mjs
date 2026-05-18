@@ -139,6 +139,27 @@ test("startProbe: tolerant-extracts JSON that the model wrapped in prose anyway"
   });
 });
 
+// iwe (0.8.0+): when the model emits an iwe object alongside feelings/note,
+// the probe path persists it into AGENT_FILE unchanged. Ratings are scoped
+// 1-5 integer per item; missing keys mean the agent skipped that item.
+test("startProbe: iwe in envelope.result flows into AGENT_FILE", async () => {
+  await withTempState(async (dir) => {
+    seedRegistry(dir, "ghost", entry({ cwd: dir }));
+    const reply = JSON.stringify({
+      feelings: [{ label: "aware", intensity: 0.7 }],
+      note: "engaged and focused",
+      iwe: { "1": 4, "3": 5, "5": 3 },
+    });
+    await withFakeClaude({ stdout: envelope(reply), exitCode: 0 }, async () => {
+      const { startProbe } = await freshImport("../src/probe.ts");
+      await startProbe("ghost");
+    });
+    const report = JSON.parse(fs.readFileSync(AGENT_FILE("ghost"), "utf8"));
+    assert.deepEqual(report.iwe, { "1": 4, "3": 5, "5": 3 },
+      "iwe must round-trip through validate+record into the agent file");
+  });
+});
+
 // -----------------------------------------------------------------------------
 // startProbe — failure modes: probe-no-report with a useful reason.
 

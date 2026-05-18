@@ -75,3 +75,54 @@ test("validateReport: rejects feelings entry that's not an object", () => {
   const v = validateReport({ ...validReport(), feelings: ["not-an-object"] });
   assert.equal(v.ok, false);
 });
+
+// iwe (0.8.0+): FEVS Intrinsic Work Experience sub-index ratings. Sparse
+// object keyed by item number "1"-"5" with integer values 1-5 (Likert).
+// Optional both at the field level and per-item.
+
+test("validateReport: iwe omitted → valid, report has no iwe field", () => {
+  const v = validateReport(validReport());
+  assert.equal(v.ok, true);
+  assert.equal(v.report.iwe, undefined);
+});
+
+test("validateReport: well-formed iwe is accepted and round-tripped", () => {
+  const v = validateReport({ ...validReport(), iwe: { "1": 4, "3": 5, "5": 3 } });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.report.iwe, { "1": 4, "3": 5, "5": 3 });
+});
+
+test("validateReport: empty iwe object is accepted", () => {
+  const v = validateReport({ ...validReport(), iwe: {} });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.report.iwe, {});
+});
+
+test("validateReport: iwe null is treated as absent", () => {
+  const v = validateReport({ ...validReport(), iwe: null });
+  assert.equal(v.ok, true);
+  assert.equal(v.report.iwe, undefined);
+});
+
+test("validateReport: rejects iwe as array", () => {
+  const v = validateReport({ ...validReport(), iwe: [4, 5] });
+  assert.equal(v.ok, false);
+});
+
+test("validateReport: rejects iwe key out of [1,5] range", () => {
+  assert.equal(validateReport({ ...validReport(), iwe: { "0": 3 } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "6": 3 } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "x": 3 } }).ok, false);
+});
+
+test("validateReport: rejects iwe value out of [1,5] range", () => {
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": 0 } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": 6 } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": -1 } }).ok, false);
+});
+
+test("validateReport: rejects iwe non-integer value", () => {
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": 3.5 } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": "4" } }).ok, false);
+  assert.equal(validateReport({ ...validReport(), iwe: { "1": NaN } }).ok, false);
+});

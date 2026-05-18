@@ -110,3 +110,6 @@ export function dashboardFile(): string {
 export function feelingsFile(): string {
   return path.join(pluginRoot(), "dashboard", "feelings.json");
 }
+export function iweFile(): string {
+  return path.join(pluginRoot(), "dashboard", "iwe.json");
+}
