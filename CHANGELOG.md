@@ -1,5 +1,16 @@
 # swarmeq changelog
 
+## 0.7.2 — registry sweep + chart negative color
+
+### Fixed
+- **Chart now uses red below the 0.5 baseline, not blue.** The `.area-neg` shaded region (and the new 0.7.0 `.trace-neg` segment lines) was using `var(--c-sad)` which is the Willcox-palette blue. That conflicted with the join/leave triangle markers below the chart (which already used `var(--c-mad)` red) and read as "calm" rather than "alarming." Both now use `var(--c-mad)` for negatives, matching the dashboard's own polarity coloring elsewhere.
+
+### Added
+- **Registry-side sweep.** The 30-second sweep loop now also drops registry entries whose `last_seen_ts` is older than the same 10-minute staleness threshold the file-sweep uses. Previously the registry grew unbounded — every session that exited abruptly (terminal closed, kill -9, parent crash) without firing the `SessionEnd` hook left a permanent entry. Stale entries from before the v0.6.0 identity-capture update were rendering as raw 8-char slugs on the dashboard for long-running daemons because they never had a `display_name`. With registry sweep enabled, those entries time out within 10 minutes of their last Stop event, just like report files. `sweepStaleRegistry(now)` is exported from `tools/src/sweep.ts` for tests; it runs automatically as the second pass of `sweepStaleAgents()` and emits an `agent-removed` SSE event for any entry not already caught by the file-sweep.
+
+### Tests
+- 4 new sweep tests in `tools/test/sweep.test.mjs`: registry entries past STALE_MS get reaped, no-registry-file is a no-op, entries missing `last_seen_ts` are left alone (defensive), and the combined `sweepStaleAgents()` run reaps both the file and the registry entry for a single dead agent. 111 tests pass on Node 22+.
+
 ## 0.7.1 — event log: chronological order, auto-scroll to latest
 
 ### Changed

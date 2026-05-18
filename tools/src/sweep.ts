@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { AGENT_FILE, stateDir } from "./paths.ts";
+import { AGENT_FILE, REGISTRY_FILE, readRegistry, stateDir, writeAtomic } from "./paths.ts";
 import { broadcast } from "./sse.ts";
 import { readLivingReports } from "./record.ts";
 import { snapshotAndBroadcast } from "./sentiment.ts";
@@ -68,12 +68,52 @@ export function sweepStaleAgents(): string[] {
   for (const a of live) lastSeen.add(a);
   primed = true;
 
+  // Registry sweep (0.7.2+): the SessionEnd hook is supposed to remove
+  // entries when a session deregisters, but sessions that exit abruptly
+  // (terminal closed, parent crash, kill -9) skip it. Without this step
+  // the registry grows unbounded and stale entries — including those
+  // predating any v0.6.0+ identity capture, so they render as raw slugs
+  // on the dashboard — linger forever. Reap any entry whose last_seen_ts
+  // is older than STALE_MS; that's the same "no Stop has fired in 10 min"
+  // signal we use for files, just applied to the registry side.
+  const regRemoved = sweepStaleRegistry(now);
+  for (const agent of regRemoved) {
+    if (!removed.includes(agent)) {
+      // Only broadcast if the file-sweep didn't already (e.g., registry-only
+      // stragglers with no surviving report file).
+      if (primed) broadcast("agent-removed", { agent, reason: "registry-stale", ts: now });
+      removed.push(agent);
+    }
+  }
+
   // If anything actually changed, refresh the sentiment chart so removing
   // a sad agent (etc.) shows up immediately on /team without waiting for
   // the next live report. Living-only: a just-removed agent must not
   // contribute to the very point we're broadcasting because of its removal.
   if (removed.length > 0) snapshotAndBroadcast(readLivingReports());
 
+  return removed;
+}
+
+// Drop registry entries whose last_seen_ts is older than STALE_MS. Returns
+// the names removed. No-op if registry can't be read; best-effort write —
+// if the atomic write fails the next sweep retries. Exported for tests.
+export function sweepStaleRegistry(now: number): string[] {
+  let reg: ReturnType<typeof readRegistry>;
+  try { reg = readRegistry(); } catch { return []; }
+  const removed: string[] = [];
+  for (const [agent, entry] of Object.entries(reg)) {
+    const lastSeen = Number(entry?.last_seen_ts) || 0;
+    if (lastSeen === 0) continue; // never updated → leave alone (defensive)
+    if (now - lastSeen > STALE_MS) {
+      delete reg[agent];
+      removed.push(agent);
+    }
+  }
+  if (removed.length > 0) {
+    try { writeAtomic(REGISTRY_FILE(), JSON.stringify(reg, null, 2)); }
+    catch { return []; }
+  }
   return removed;
 }
 

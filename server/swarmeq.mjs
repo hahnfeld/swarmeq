@@ -17285,7 +17285,39 @@ function sweepStaleAgents() {
   lastSeen.clear();
   for (const a of live) lastSeen.add(a);
   primed = true;
+  const regRemoved = sweepStaleRegistry(now);
+  for (const agent of regRemoved) {
+    if (!removed.includes(agent)) {
+      if (primed) broadcast("agent-removed", { agent, reason: "registry-stale", ts: now });
+      removed.push(agent);
+    }
+  }
   if (removed.length > 0) snapshotAndBroadcast(readLivingReports());
+  return removed;
+}
+function sweepStaleRegistry(now) {
+  let reg;
+  try {
+    reg = readRegistry();
+  } catch {
+    return [];
+  }
+  const removed = [];
+  for (const [agent, entry] of Object.entries(reg)) {
+    const lastSeen2 = Number(entry?.last_seen_ts) || 0;
+    if (lastSeen2 === 0) continue;
+    if (now - lastSeen2 > STALE_MS) {
+      delete reg[agent];
+      removed.push(agent);
+    }
+  }
+  if (removed.length > 0) {
+    try {
+      writeAtomic(REGISTRY_FILE(), JSON.stringify(reg, null, 2));
+    } catch {
+      return [];
+    }
+  }
   return removed;
 }
 function startSweepTimer() {

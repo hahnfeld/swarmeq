@@ -521,17 +521,23 @@
     font-family: var(--mono); font-size: 9.5px;
     fill: var(--text-4); letter-spacing: 0.08em;
   }
+  /* Negative chart shading uses --c-mad (red) so green/red corresponds to
+     positive/negative sentiment in the conventional way. Through 0.7.1 the
+     negative area used --c-sad (blue), which matched the Willcox palette
+     but read as "calm" rather than "alarming" — wrong signal for a polarity
+     gauge. Same fix applies to the per-segment trace below. */
   .chart-bay .area-pos { fill: var(--c-peaceful); fill-opacity: 0.10; }
-  .chart-bay .area-neg { fill: var(--c-sad); fill-opacity: 0.10; }
-  /* Per-segment trace lines (0.7.0+). Hue tracks polarity; stroke-opacity
-     is set inline per segment to encode intensity (distance from 0.5). */
+  .chart-bay .area-neg { fill: var(--c-mad); fill-opacity: 0.10; }
+  /* Per-segment trace lines (0.7.0+). Hue tracks polarity (green above 0.5,
+     red below); stroke-opacity is set inline per segment to encode intensity
+     (distance from 0.5). */
   .chart-bay .trace-pos {
     stroke: var(--c-peaceful);
     stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
     fill: none;
   }
   .chart-bay .trace-neg {
-    stroke: var(--c-sad);
+    stroke: var(--c-mad);
     stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
     fill: none;
   }
