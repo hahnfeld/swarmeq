@@ -1,9 +1,22 @@
 # swarmeq changelog
 
+## 0.8.2 — engagement panel polish + citations moved to page footer
+
+### Fixed
+- **Wheel emoji is centered again.** The v0.8.1 in-UI Willcox credit was placed inside `.wheel-bay`, whose `aspect-ratio: 1` + absolutely-positioned `.wheel-emoji` layout doesn't tolerate normal-flow children. The credit `<p>` was eating vertical space, the SVG was being squeezed, and the emoji's 50%-anchored position drifted upward off the wheel center. v0.8.2 pulls all source-material citations out of the per-artifact areas entirely.
+
+### Changed
+- **Engagement panel typography rebuilt to match the page system.** The v0.8.0/0.8.1 IWE panel used ad-hoc fonts and sizes that didn't quite blend with the rest of the dashboard. v0.8.2 retypes it as a peer of the existing readout / sentiment panels: the section eyebrow uses the page's standard mono-uppercase crumb style; item text uses the Geist display body voice (14px, --text-2) matching `.also-line` and `.sentiment .caption`; the numeric scale on the right uses the same `font-variant-numeric: tabular-nums` mono treatment as `.feeling-intensity`; the per-item bar is the page's standard 140px × 5px bar (faint baseline rule + soft glow on the green fill), identical to the feeling-intensity bar in the readout.
+- **Panel header simplified to just "AGENT ENGAGEMENT".** The agent name and role are already shown in the readout's eyebrow at the top of the page (`LEAD@FUN_TEAM · PORTRAIT`), so repeating the name in the engagement panel's crumb was redundant. The grand-mean → percent-positive overall (`67 % positive`) now renders in the right side of the engagement panel's header, in a styling that mirrors `.sentiment .pct`'s value/sym/lab triad.
+- **Source-material citations consolidated into a single `<footer>` at the bottom of the page** rather than appearing under each artifact. Cleaner per-agent panels, no container-layout interactions, easier to find both citations together. The footer credits (1) the Willcox feelings wheel as an adaptation (curated 78-label subset, swarmeq's own palette and SVG layout) and (2) the FEVS Intrinsic Work Experience items as drawn from the OPM 2023 FEVS Technical Report. README and ARCHITECTURE source-material wording matched to the new footer.
+- **Wheel credit phrasing simplified** — "adapted from Willcox (1982)" is enough; the prior "Not a verbatim reproduction" sentence was redundant once "adapted" is in the line.
+
 ## 0.8.1 — clarify Willcox wheel attribution as a derivative work
 
 ### Changed
 - **In-UI wheel attribution and README "Source material" / "78-entry Willcox 1982 taxonomy" sections** now explicitly state that swarmeq's wheel is an *adaptation* of the 1982 Willcox feelings wheel — a curated 78-label subset with our own color palette and SVG layout — rather than a verbatim reproduction. The v0.8.0 in-UI credit line said "after Willcox" which is correct in academic style but too subtle for a general reader; the new wording (`Feelings wheel here is an adaptation … Not a verbatim reproduction of the 1982 wheel.`) makes the derivative-work status unambiguous. No code or schema changes — docs and one HTML string only.
+
+> Note: 0.8.1 also introduced a layout regression (broken wheel-emoji centering) when the credit `<p>` was placed inside `.wheel-bay`; the fix and a cleaner footer-based citation layout ship in 0.8.2.
 
 ## 0.8.0 — FEVS Intrinsic Work Experience panel on the per-agent view
 

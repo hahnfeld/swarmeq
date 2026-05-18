@@ -278,17 +278,33 @@
   }
   .stage[hidden] { display: none; }
 
-  /* Source-material credit lines (under the wheel; under the IWE panel).
-     Same size/tone family so they read together as attributions, not
-     UI chrome. */
-  .wheel-credit {
-    margin: 12px 0 0;
-    font-family: var(--display); font-size: 10px; line-height: 1.5;
-    color: var(--text-4); text-align: center;
+  /* Source-material citations. Single page footer (rather than inline
+     under each artifact) keeps the per-agent panels uncluttered and
+     avoids stretching containers like .wheel-bay (aspect-ratio:1) that
+     can't hold normal-flow text without breaking their layout. */
+  .page-credits {
+    margin: 64px auto 32px;
+    padding: 28px 32px 0;
+    border-top: 1px solid var(--line);
+    max-width: 960px;
+    font-family: var(--display); font-size: 10.5px; line-height: 1.6;
+    color: var(--text-4);
   }
-  .wheel-credit em { font-family: var(--serif); font-style: italic; }
+  .page-credits p { margin: 0 0 12px; }
+  .page-credits p:last-child { margin-bottom: 0; }
+  .page-credits em { font-family: var(--serif); font-style: italic; }
+  .page-credits a { color: var(--text-3); text-decoration: underline; text-decoration-color: var(--line); }
 
-  /* ─── Intrinsic Work Experience panel (per-agent, below readout) ─ */
+  /* ─── Agent Engagement panel (per-agent, below readout) ─────────
+     Typography intentionally mirrors the page's existing system:
+     • header `crumb` matches `.readout .crumb` and `.sentiment .crumb`
+       (mono 10px, --text-4, 0.18em letter-spacing, UPPERCASE eyebrow)
+     • item text matches `.also-line` / `.sentiment .caption` body voice
+       (Geist display, 14px, --text-2)
+     • bar matches `.feeling-intensity .bar` exactly — 140px × 5px with
+       a faint baseline rule and a soft glow on the fill (the page's
+       established progress-bar treatment)
+     • numerics match `.feeling-intensity` (mono, tabular-nums) */
   .iwe-panel {
     grid-column: 1 / -1;
     margin-top: 56px;
@@ -297,65 +313,77 @@
     font-family: var(--display);
   }
   .iwe-panel[hidden] { display: none; }
-  .iwe-panel .crumb {
-    font-family: var(--mono); font-size: 11px;
-    color: var(--text-3); letter-spacing: 0.01em;
+  .iwe-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
     margin: 0 0 24px;
-    display: flex; align-items: baseline; gap: 12px;
+  }
+  .iwe-panel .crumb {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text-4); letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0;
   }
   .iwe-overall {
-    margin-left: auto;
-    font-family: var(--mono); font-size: 11px;
+    margin: 0;
+    font-family: var(--mono); font-size: 13px;
     color: var(--text-2); letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex; align-items: baseline; gap: 6px;
   }
   .iwe-overall[hidden] { display: none; }
   .iwe-overall .value {
-    color: var(--c-peaceful); font-weight: 600; font-size: 13px;
-    margin-right: 4px;
+    color: var(--c-peaceful); font-weight: 500; font-size: 22px;
+    transition: color 720ms ease;
   }
-  .iwe-items { display: flex; flex-direction: column; gap: 4px; }
+  .iwe-overall .sym {
+    font-size: 0.55em; color: var(--text-3); margin-left: 2px; letter-spacing: 0;
+  }
+  .iwe-overall .lab {
+    color: var(--text-4); text-transform: lowercase; letter-spacing: 0.12em;
+    font-size: 10px;
+  }
+  .iwe-items { display: flex; flex-direction: column; }
   .iwe-item {
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) 180px 28px;
+    grid-template-columns: 18px minmax(0, 1fr) 140px 28px;
     align-items: center;
-    gap: 14px;
-    padding: 8px 0;
+    gap: 16px;
+    padding: 10px 0;
   }
   .iwe-item + .iwe-item { border-top: 1px solid var(--line); }
-  .iwe-item.skipped { opacity: 0.45; }
+  .iwe-item.skipped { opacity: 0.4; }
   .iwe-item .qn {
     font-family: var(--mono); font-size: 10.5px;
-    color: var(--text-3); text-align: right; letter-spacing: 0.04em;
+    color: var(--text-4); text-align: right; letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
   }
   .iwe-item .qtext {
-    font-family: var(--display); font-size: 12.5px;
+    font-family: var(--display); font-weight: 400; font-size: 14px;
     color: var(--text-2); line-height: 1.4;
     overflow-wrap: break-word;
   }
   .iwe-item .iwe-bar {
     position: relative;
-    height: 6px;
-    background: var(--bg-1);
+    width: 140px; height: 5px;
+  }
+  .iwe-item .iwe-bar::before {
+    /* Faint baseline rule, identical treatment to .feeling-intensity .bar */
+    content: ""; position: absolute; inset: 0;
+    background: var(--line);
     border-radius: 3px;
-    overflow: hidden;
   }
   .iwe-item .iwe-bar .fill {
-    position: absolute; inset: 0 auto 0 0;
+    position: absolute; left: 0; top: 0; height: 100%;
     background: var(--c-peaceful);
     border-radius: 3px;
+    box-shadow: 0 0 12px 0 color-mix(in oklab, var(--c-peaceful) 50%, transparent);
     transition: width 360ms ease;
   }
   .iwe-item .iwe-value {
-    font-family: var(--mono); font-size: 11px;
-    color: var(--text-2); text-align: right;
+    font-family: var(--mono); font-size: 13px;
+    color: var(--text-2); text-align: right; letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
   }
-  .iwe-credit {
-    margin: 28px 0 0;
-    font-family: var(--display); font-size: 10px; line-height: 1.55;
-    color: var(--text-4);
-    max-width: 760px;
-  }
-  .iwe-credit a { color: var(--text-3); text-decoration: underline; text-decoration-color: var(--line); }
 
   /* ─── Wheel (the hero) ───────────────────────────────────────── */
   .wheel-bay {
@@ -747,12 +775,6 @@
         </g>
       </svg>
       <div class="wheel-emoji" id="wheel-emoji" aria-hidden="true">·</div>
-      <p class="wheel-credit">
-        Feelings wheel here is an adaptation — a curated 78-label subset, recolored — of the original feelings wheel by
-        Willcox, G. (1982), "The Feelings Wheel,"
-        <em>Transactional Analysis Journal</em> 12(4): 274–276.
-        Not a verbatim reproduction of the 1982 wheel.
-      </p>
     </div>
 
     <div class="readout">
@@ -773,21 +795,11 @@
     </div>
 
     <section id="iwe" class="iwe-panel" hidden>
-      <p class="crumb">
-        <span id="iwe-name">—</span> · intrinsic work experience
-        <span class="iwe-overall" id="iwe-overall" aria-label="percent positive"></span>
-      </p>
+      <header class="iwe-head">
+        <p class="crumb">agent engagement</p>
+        <p class="iwe-overall" id="iwe-overall" aria-label="percent positive"></p>
+      </header>
       <div class="iwe-items" id="iwe-items"></div>
-      <p class="iwe-credit">
-        Intrinsic Work Experience items 1–4 verbatim from the
-        U.S. Office of Personnel Management's Federal Employee Viewpoint Survey (FEVS),
-        Employee Engagement Index, Intrinsic Work Experience Sub-Index, as published in the
-        <a href="https://www.opm.gov/fevs/" target="_blank" rel="noopener">2023 FEVS Technical Report</a> (Revised April 2025), p. 13.
-        Item 5 adapted for the AI-agent context: "agency's" → "the user's"
-        (original FEVS Q7: "I know how my work relates to the agency's goals.").
-        The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105).
-        Sub-index score follows the FEVS method: percent-positive (rating ≥ 4) averaged across rated items.
-      </p>
     </section>
   </section>
 
@@ -815,6 +827,29 @@
       <ol class="event-log" id="event-log" aria-label="agent join/leave events"></ol>
     </div>
   </section>
+
+  <!-- Source-material citations. Single footer at the bottom of the page
+       rather than inline under each artifact — keeps the per-agent panels
+       uncluttered and avoids stretching the wheel-bay's aspect-ratio:1
+       container. -->
+  <footer class="page-credits">
+    <p>
+      Feelings wheel adapted from
+      Willcox, G. (1982), "The Feelings Wheel,"
+      <em>Transactional Analysis Journal</em> 12(4): 274–276
+      — curated 78-label subset with swarmeq's own palette and SVG layout.
+    </p>
+    <p>
+      Intrinsic Work Experience items 1–4 from the
+      U.S. Office of Personnel Management's Federal Employee Viewpoint Survey,
+      Intrinsic Work Experience Sub-Index,
+      <a href="https://www.opm.gov/fevs/" target="_blank" rel="noopener">2023 FEVS Technical Report</a> (Revised April 2025), p. 13.
+      Item 5 adapted for the AI-agent context: "agency's" → "the user's"
+      (original FEVS Q7: "I know how my work relates to the agency's goals.").
+      The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105).
+      Sub-index score follows the FEVS method: percent-positive (rating ≥ 4) averaged across rated items.
+    </p>
+  </footer>
 
 <script type="module">
 const CORE_R = [60, 122];
@@ -1297,7 +1332,6 @@ function renderIwe() {
   const r = store.agents[store.active];
   if (!r) { panel.hidden = true; return; }
   panel.hidden = false;
-  $("iwe-name").textContent = displayNameFor(store.active);
   const ratings = (r.iwe && typeof r.iwe === "object" && !Array.isArray(r.iwe)) ? r.iwe : {};
   let rated = 0, positive = 0;
   for (const row of panel.querySelectorAll(".iwe-item")) {
@@ -1317,15 +1351,19 @@ function renderIwe() {
       val.textContent = "—";
     }
   }
+  // Overall: percent-positive (rating ≥ 4) averaged across rated items,
+  // per the FEVS scoring method. Markup mirrors the `.sentiment .pct`
+  // pattern (`<value><sym>%</sym> <lab>positive</lab>`).
   const overall = $("iwe-overall");
   if (overall) {
     if (rated > 0) {
       const pct = Math.round((positive / rated) * 100);
       overall.replaceChildren();
       const v = document.createElement("span"); v.className = "value";
-      v.textContent = `${pct}%`;
-      const lab = document.createTextNode("positive");
-      overall.append(v, lab);
+      v.textContent = String(pct);
+      const sym = document.createElement("span"); sym.className = "sym"; sym.textContent = "%";
+      const lab = document.createElement("span"); lab.className = "lab"; lab.textContent = "positive";
+      overall.append(v, sym, lab);
       overall.hidden = false;
     } else {
       overall.hidden = true;

@@ -52,7 +52,7 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.1.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.2.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
@@ -128,7 +128,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.8.1
+## Status: 0.8.2
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
@@ -141,8 +141,10 @@ Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windo
 
 The dashboard visualizes two well-known instruments, both attributed in the UI itself:
 
-- **Feelings wheel** (under the wheel) — *adapted from* Willcox, G. (1982). "The Feelings Wheel." *Transactional Analysis Journal* 12(4): 274–276. swarmeq's wheel is a derivative work: a curated 78-label subset of the 1982 taxonomy with our own color palette and SVG layout. It is **not** a verbatim reproduction of the original wheel.
-- **Intrinsic Work Experience (5 items)** (under the IWE panel) — U.S. OPM Federal Employee Viewpoint Survey, Intrinsic Work Experience Sub-Index, [2023 FEVS Technical Report](https://www.opm.gov/fevs/) (Revised April 2025), p. 13. The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105); items 1–4 in `dashboard/iwe.json` are reproduced verbatim. Item 5 is adapted for the AI-agent-team context ("agency's" → "the user's"); the original FEVS Q7 wording is preserved in the in-panel attribution.
+Both sources are also cited in a footer at the bottom of the dashboard itself.
+
+- **Feelings wheel** — *adapted from* Willcox, G. (1982). "The Feelings Wheel." *Transactional Analysis Journal* 12(4): 274–276. swarmeq's wheel is a curated 78-label subset of the 1982 taxonomy with our own color palette and SVG layout.
+- **Agent Engagement (5 items)** — adapted from the U.S. OPM Federal Employee Viewpoint Survey, Intrinsic Work Experience Sub-Index, [2023 FEVS Technical Report](https://www.opm.gov/fevs/) (Revised April 2025), p. 13. The FEVS instrument is a U.S. Government work in the public domain (17 U.S.C. § 105); items 1–4 in `dashboard/iwe.json` are reproduced verbatim. Item 5 is adapted for the AI-agent context ("agency's" → "the user's"); the original FEVS Q7 wording is preserved in the dashboard footer.
 
 ## License
 
