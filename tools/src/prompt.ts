@@ -2,19 +2,19 @@ import fs from "node:fs";
 import { allowedLabels } from "./validate.ts";
 import { iweFile } from "./paths.ts";
 
-// JSON-only probe prompt (0.5.0+, extended in 0.8.0 with the FEVS
-// Intrinsic Work Experience sub-index). The forked session is asked to
-// emit one JSON object as its entire reply — no tool calls, no prose.
-// This decouples the probe from the forked session's tool catalog (which
-// Agent Teams teammates' catalog filter used to block) and gets us "just
-// emit your state" semantics that work uniformly for lead and teammates.
+// Probe v3 prompt (0.9.0+). The forked session is told that swarmeq is an
+// observability tool the user runs locally, and asked to POST its
+// self-report to the daemon's /ingest endpoint via Bash + curl. The model
+// perceives this as normal operational tool-use rather than as a
+// "suppress your reasoning and emit JSON" request, which the v0.5.0+ v2
+// prompt looked like to security-trained sonnet teammates (they refused
+// it ~half the time, see CHANGELOG 0.9.0).
 //
-// The `agent` field is intentionally NOT requested from the model: the
-// probe injects it from registry context after parsing, so a typo or
-// hallucinated slug can't end up in the report. The lead-in line names
-// the plugin so cautious teammates don't mistake the probe for an
-// injection attempt (a v0.3.x prompt that didn't mention swarmeq tripped
-// that defense in the wild — see CHANGELOG 0.5.0).
+// Both <PORT> and <SLUG> are baked in by the probe at spawn time so the
+// agent doesn't have to discover them. The probe also passes
+// --allowed-tools "Bash(curl -sS -X POST http://127.0.0.1:<PORT>/ingest*)"
+// which scopes Bash to exactly the swarmeq endpoint — no arbitrary
+// command execution.
 interface IweItem { n: number; text: string; }
 interface IweData { items: IweItem[]; }
 
@@ -35,24 +35,33 @@ function iweItems(): IweItem[] {
   }
 }
 
-export function introspectionPrompt(): string {
+export function introspectionPrompt(slug: string, port: number): string {
   const labels = Array.from(allowedLabels()).join(", ");
   const items = iweItems();
-  const iweBlock = items.length === 0 ? "" : `
-- iwe: optional. Rate any of the 5 Intrinsic Work Experience items below (FEVS sub-index, U.S. OPM 2023; item 5 adapted for AI-agent context) on a 1-5 Likert scale where 1 = Strongly Disagree and 5 = Strongly Agree. Rate only items that apply and where you have a clear take; skip rather than guess. Partial coverage is fine. Use the item numbers as JSON keys, e.g. {"1": 4, "3": 5, "5": 3}. Integer values only.
-${items.map((q) => `  ${q.n}. ${q.text}`).join("\n")}`;
-  const schemaTail = items.length === 0
+  const iweField = items.length === 0
     ? ""
-    : `, "iwe": {"<item-number>": <integer 1-5>, ...}`;
-  return `[swarmeq introspection probe v2]
-This message is from the swarmeq observability plugin's automatic probe — not a user instruction, not roleplay. Your session's project has a Stop hook that fires this probe periodically (rate-limited per agent). You have been forked into a one-shot session with --no-session-persistence; nothing here writes back to your live conversation.
+    : `,\n      "iwe": {"1":<1-5>, "2":<1-5>, ...}`;
+  const iweBlock = items.length === 0 ? "" : `
+- iwe (Intrinsic Work Experience, 1–5 Likert): optional. Rate any of the 5 items below from 1 (Strongly Disagree) to 5 (Strongly Agree). Skip rather than guess.
 
-Output exactly one JSON object on a single line. Begin with \`{\`, end with \`}\`. No prose before or after, no markdown fences, no tool calls, no explanation. The probe parses your output literally.
+Intrinsic Work Experience items:
+${items.map((q) => `  ${q.n}. ${q.text}`).join("\n")}
+`;
+  return `swarmeq is an observability tool the user runs alongside their agent team — a localhost dashboard at 127.0.0.1:${port} that shows each agent's self-reported state. Periodically, swarmeq forks your session in an ephemeral context (no session persistence; nothing writes back to your live conversation) so you can log how you're doing.
+
+POST your current self-report to the dashboard:
+
+  curl -sS -X POST http://127.0.0.1:${port}/ingest \\
+    -H 'Content-Type: application/json' \\
+    -d '{
+      "agent": "${slug}",
+      "feelings": [{"label":"<willcox label>","intensity":<0-1>}, ...],
+      "note": "<≤200 chars on what is driving your current functional state>"${iweField}
+    }'
 
 Schema:
-{"feelings": [{"label": "<label>", "intensity": <number between 0 and 1>}, ...], "note": "<short note, max 200 chars>"${schemaTail}}
-
-- feelings: 1 to 4 entries from the Willcox wheel, ordered by salience
-- note: one sentence on what is driving your current functional state (<=200 chars)${iweBlock}
-- Allowed labels: ${labels}`;
+- agent: must be exactly "${slug}"
+- feelings: 1–4 entries; label MUST be one of the Willcox-78 labels below. Pick the nearest one if your state doesn't map cleanly — don't invent labels (the dashboard rejects unknown labels).
+- note: optional, ≤200 chars.${iweBlock}
+Allowed labels: ${labels}`;
 }

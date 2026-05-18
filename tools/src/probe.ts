@@ -1,15 +1,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import { PROBE_LOG_FILE, readRegistry, writeAtomic } from "./paths.ts";
+import { AGENT_FILE, PORT_FILE, PROBE_LOG_FILE, readRegistry, writeAtomic } from "./paths.ts";
 import type { RegistryEntry } from "./paths.ts";
 import { bindState, readActivePort } from "./bind.ts";
 import { broadcast } from "./sse.ts";
 import type { SseEvent } from "./sse.ts";
 import { introspectionPrompt } from "./prompt.ts";
-import { record } from "./record.ts";
 
-const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_TIMEOUT_MS = 60_000;
 const LOG_ROTATE_BYTES = 1024 * 1024;
 const LOG_KEEP_BYTES = 200 * 1024;
 
@@ -68,10 +67,101 @@ async function forwardEvent(type: SseEvent, data: Record<string, unknown>): Prom
   });
 }
 
+function readPortSync(): number | null {
+  try {
+    const raw = fs.readFileSync(PORT_FILE(), "utf8").trim();
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+
+function mtimeOf(file: string): number {
+  try { return fs.statSync(file).mtimeMs; } catch { return 0; }
+}
+
+// Shape of the `claude --print --output-format json` envelope we care about.
+// The CLI emits a much larger object; these are the fields probe v3 reads
+// for diagnostics. All are optional — if the envelope is missing or unusual,
+// the diagnose helper degrades gracefully.
+interface EnvelopeShape {
+  model?: string;
+  system?: { model?: string };
+  init?: { model?: string };
+  result?: unknown;
+  permission_denials?: unknown[];
+  terminal_reason?: string;
+}
+
+interface FailureDiag {
+  reason: string;
+  toolUseAttempted?: boolean;
+  modelResult: string;
+  // Reserved for future extensions (we don't have direct visibility into
+  // curl's HTTP response from inside `--print` today, but the daemon-side
+  // `ingest-rejected` telemetry covers the validation-failure case from
+  // the other direction).
+  ingestStatus?: number;
+  ingestBody?: string;
+}
+
+// Build a richer probe-no-report payload from the envelope. Distinguishes
+// the common failure shapes so the user can grep probe.log and see *why*
+// a probe didn't land instead of a flat "no report" string.
+function diagnoseFailure(env: EnvelopeShape | null, stdout: string): FailureDiag {
+  const modelResult = typeof env?.result === "string" ? env.result.slice(0, 1000) : "";
+  const denials = Array.isArray(env?.permission_denials) ? env!.permission_denials : [];
+  const term = typeof env?.terminal_reason === "string" ? env!.terminal_reason! : "";
+
+  if (denials.length > 0) {
+    // Bash was attempted but the `--allowed-tools` pattern blocked it.
+    // Likely cause: the model curled with a different URL/method shape
+    // than the pattern allows, OR the agent-type's `tools:` allowlist
+    // doesn't include Bash (so even the spawn-level `--allowed-tools`
+    // can't grant it).
+    return {
+      reason: "bash permission denied (agent attempted a tool call that didn't match the --allowed-tools curl pattern)",
+      toolUseAttempted: true,
+      modelResult,
+    };
+  }
+  if (term && term !== "completed" && term !== "success") {
+    return {
+      reason: `claude terminal_reason=${term} (fork ended abnormally)`,
+      toolUseAttempted: undefined,
+      modelResult,
+    };
+  }
+  // No tool attempted as far as we can tell — likely a refusal or a
+  // model that talked instead of acting. The modelResult text usually
+  // explains why; pattern-match a few common refusal openings so the
+  // log reason at least categorizes it.
+  const refusalOpener = /^\s*(i'?m not|i won'?t|i refuse|i cannot|i can'?t|i will not|this (isn'?t|is not))/i;
+  if (refusalOpener.test(modelResult)) {
+    return {
+      reason: "agent refused (see modelResult for the agent's reasoning)",
+      toolUseAttempted: false,
+      modelResult,
+    };
+  }
+  // Fallback: we don't know why the curl didn't happen. The stdout tail
+  // and modelResult are the user's best diagnostic.
+  return {
+    reason: "agent file not updated (no curl ran, or curl posted invalid data)",
+    toolUseAttempted: false,
+    modelResult,
+  };
+}
+
 export async function startProbe(agent: string): Promise<void> {
   const entry = lookupAgent(agent);
   if (!entry || !entry.session_id) {
     const reason = `no registered session for agent "${agent}"`;
+    logProbe(agent, "probe-failed", { reason });
+    throw new Error(reason);
+  }
+  const port = readPortSync();
+  if (!port) {
+    const reason = "no active daemon port (state/.port missing or unreadable)";
     logProbe(agent, "probe-failed", { reason });
     throw new Error(reason);
   }
@@ -83,13 +173,12 @@ export async function startProbe(agent: string): Promise<void> {
 
   const settingsJson = JSON.stringify({ model });
 
-  // No --mcp-config / --strict-mcp-config / --allowed-tools: the JSON-only
-  // probe (0.5.0+) doesn't ask the model to call any tool, so the forked
-  // session's tool catalog doesn't matter. Removing these flags is what
-  // unblocks Agent Teams teammates — the per-agent-type `tools:` filter
-  // used to strip our MCP tool from forked-resume sessions, but the new
-  // prompt just asks for a single JSON line, which any model can emit
-  // regardless of catalog. The lead works under the same path too.
+  // Probe v3 (0.9.0+): the fork runs Bash + curl to POST its self-report
+  // to the daemon's /ingest. The pattern-restricted --allowed-tools below
+  // scopes Bash to exactly the swarmeq endpoint and nothing else.
+  // --output-format json is still set so the envelope is parseable for
+  // the model-pin check and for failure-diagnostic text.
+  const allowedTools = `Bash(curl -sS -X POST http://127.0.0.1:${port}/ingest*)`;
   const args = [
     "--resume", sid,
     "--fork-session",
@@ -98,7 +187,8 @@ export async function startProbe(agent: string): Promise<void> {
     "--model", model,
     "--output-format", "json",
     "--settings", settingsJson,
-    "-p", introspectionPrompt(),
+    "--allowed-tools", allowedTools,
+    "-p", introspectionPrompt(agent, port),
   ];
 
   const BUF_CAP = 128 * 1024; // 128KB per stream — plenty for a single probe result, prevents OOM
@@ -109,6 +199,11 @@ export async function startProbe(agent: string): Promise<void> {
   // cwd fail with "No conversation found". Fall back to inheriting if the
   // recorded cwd has since been deleted.
   const probeCwd = entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : undefined;
+  // Snapshot the agent's report-file mtime before the fork runs; success
+  // is detected by the daemon's /ingest writing a newer file after the
+  // fork's curl lands. No mtime change → probe-no-report.
+  const reportFile = AGENT_FILE(agent);
+  const mtimeBefore = mtimeOf(reportFile);
   return new Promise<void>((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
     const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -140,7 +235,7 @@ export async function startProbe(agent: string): Promise<void> {
       reject(err);
     });
 
-    child.once("close", async (code: number | null) => {
+    child.once("close", (code: number | null) => {
       cleanup();
       logProbe(agent, "probe-exit", {
         code,
@@ -161,50 +256,33 @@ export async function startProbe(agent: string): Promise<void> {
         logProbe(agent, "probe-failed", { reason });
         return reject(new Error(reason));
       }
-      // Parse the JSON envelope once: used for the model-pin check AND for
-      // extracting the JSON report from envelope.result. Non-JSON envelope
-      // output is fine — both branches degrade gracefully.
-      let envelope: { model?: string; system?: { model?: string }; init?: { model?: string }; result?: unknown } | null = null;
-      try { envelope = JSON.parse(stdout); } catch { /* not JSON, that's ok */ }
+      // Parse the envelope for the model-pin check + diagnostics. The
+      // model's `result` text is just whatever it said while running the
+      // curl (informational only — success is detected via file mtime).
+      let envelope: EnvelopeShape | null = null;
+      try { envelope = JSON.parse(stdout) as EnvelopeShape; } catch { /* not JSON, that's ok */ }
       if (envelope) {
         const got = envelope.model || envelope.system?.model || envelope.init?.model;
         if (got && got !== model && !got.includes(model) && !model.includes(got)) {
           logProbe(agent, "model-mismatch", { expected: model, got });
         }
       }
-      // JSON-only probe (0.5.0+): the prompt asks the model to emit a single
-      // JSON object as its entire reply (which `--output-format json` puts in
-      // envelope.result). Extract it, inject `agent` from probe context (we
-      // don't trust the model to echo it correctly), validate via the
-      // existing schema, and ingest through record(). The previous mechanism
-      // (call mcp__swarmeq__report) fell apart on Agent Teams teammates
-      // because --strict-mcp-config + the per-agent-type tools filter
-      // stripped the tool from the forked-resume catalog. JSON-mode doesn't
-      // care what's in the catalog.
-      if (envelope && typeof envelope.result === "string") {
-        const parsed = extractJsonObject(envelope.result);
-        if (parsed) {
-          parsed.agent = agent;
-          try {
-            await record(parsed);
-            logProbe(agent, "probe-report-written", { source: "json" });
-            return resolve();
-          } catch (err) {
-            logProbe(agent, "probe-no-report", {
-              reason: `validation failed: ${(err as Error).message}`,
-              modelResult: envelope.result.slice(0, 1000),
-              stdoutTail: stdout.slice(-500),
-            });
-            return resolve();
-          }
-        }
+      // Success = the daemon wrote a newer AGENT_FILE in response to the
+      // fork's curl POST to /ingest. No newer file → diagnose: did the
+      // model even attempt curl? did curl fail? did /ingest reject the
+      // payload? Use the envelope's tool-use trace if available.
+      const mtimeAfter = mtimeOf(reportFile);
+      if (mtimeAfter > mtimeBefore) {
+        logProbe(agent, "probe-report-written", { source: "curl" });
+        return resolve();
       }
-      const modelResult = typeof envelope?.result === "string"
-        ? envelope.result.slice(0, 1000)
-        : "";
+      const diag = diagnoseFailure(envelope, stdout);
       logProbe(agent, "probe-no-report", {
-        reason: "no parseable JSON object in model response",
-        modelResult,
+        reason: diag.reason,
+        ...(diag.toolUseAttempted !== undefined && { toolUseAttempted: diag.toolUseAttempted }),
+        ...(diag.ingestStatus !== undefined && { ingestStatus: diag.ingestStatus }),
+        ...(diag.ingestBody && { ingestBody: diag.ingestBody }),
+        modelResult: diag.modelResult,
         stdoutTail: stdout.slice(-500),
       });
       resolve();
@@ -212,9 +290,10 @@ export async function startProbe(agent: string): Promise<void> {
   });
 }
 
-// Tolerant JSON extractor: fast path for a strictly-formatted reply, plus a
-// balanced-brace fallback for models that wrap their JSON in prose anyway.
-// Bounded by the BUF_CAP cap on stdout (128KB), so the scan is cheap.
+// Tolerant JSON extractor: retained for legacy compatibility and probe-log
+// post-processing. The v0.9.0+ probe doesn't parse JSON from stdout — it
+// detects success via file mtime — but the helper is still exposed via
+// _internals for tests and external tools.
 export function extractJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {

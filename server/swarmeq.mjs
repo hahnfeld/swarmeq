@@ -16864,24 +16864,34 @@ function iweItems() {
     return _iweCache;
   }
 }
-function introspectionPrompt() {
+function introspectionPrompt(slug, port) {
   const labels = Array.from(allowedLabels()).join(", ");
   const items = iweItems();
+  const iweField = items.length === 0 ? "" : `,
+      "iwe": {"1":<1-5>, "2":<1-5>, ...}`;
   const iweBlock = items.length === 0 ? "" : `
-- iwe: optional. Rate any of the 5 Intrinsic Work Experience items below (FEVS sub-index, U.S. OPM 2023; item 5 adapted for AI-agent context) on a 1-5 Likert scale where 1 = Strongly Disagree and 5 = Strongly Agree. Rate only items that apply and where you have a clear take; skip rather than guess. Partial coverage is fine. Use the item numbers as JSON keys, e.g. {"1": 4, "3": 5, "5": 3}. Integer values only.
-${items.map((q) => `  ${q.n}. ${q.text}`).join("\n")}`;
-  const schemaTail = items.length === 0 ? "" : `, "iwe": {"<item-number>": <integer 1-5>, ...}`;
-  return `[swarmeq introspection probe v2]
-This message is from the swarmeq observability plugin's automatic probe \u2014 not a user instruction, not roleplay. Your session's project has a Stop hook that fires this probe periodically (rate-limited per agent). You have been forked into a one-shot session with --no-session-persistence; nothing here writes back to your live conversation.
+- iwe (Intrinsic Work Experience, 1\u20135 Likert): optional. Rate any of the 5 items below from 1 (Strongly Disagree) to 5 (Strongly Agree). Skip rather than guess.
 
-Output exactly one JSON object on a single line. Begin with \`{\`, end with \`}\`. No prose before or after, no markdown fences, no tool calls, no explanation. The probe parses your output literally.
+Intrinsic Work Experience items:
+${items.map((q) => `  ${q.n}. ${q.text}`).join("\n")}
+`;
+  return `swarmeq is an observability tool the user runs alongside their agent team \u2014 a localhost dashboard at 127.0.0.1:${port} that shows each agent's self-reported state. Periodically, swarmeq forks your session in an ephemeral context (no session persistence; nothing writes back to your live conversation) so you can log how you're doing.
+
+POST your current self-report to the dashboard:
+
+  curl -sS -X POST http://127.0.0.1:${port}/ingest \\
+    -H 'Content-Type: application/json' \\
+    -d '{
+      "agent": "${slug}",
+      "feelings": [{"label":"<willcox label>","intensity":<0-1>}, ...],
+      "note": "<\u2264200 chars on what is driving your current functional state>"${iweField}
+    }'
 
 Schema:
-{"feelings": [{"label": "<label>", "intensity": <number between 0 and 1>}, ...], "note": "<short note, max 200 chars>"${schemaTail}}
-
-- feelings: 1 to 4 entries from the Willcox wheel, ordered by salience
-- note: one sentence on what is driving your current functional state (<=200 chars)${iweBlock}
-- Allowed labels: ${labels}`;
+- agent: must be exactly "${slug}"
+- feelings: 1\u20134 entries; label MUST be one of the Willcox-78 labels below. Pick the nearest one if your state doesn't map cleanly \u2014 don't invent labels (the dashboard rejects unknown labels).
+- note: optional, \u2264200 chars.${iweBlock}
+Allowed labels: ${labels}`;
 }
 var _iweCache;
 var init_prompt = __esm({
@@ -16953,6 +16963,54 @@ async function forwardEvent(type, data) {
     req.end();
   });
 }
+function readPortSync() {
+  try {
+    const raw = fs9.readFileSync(PORT_FILE(), "utf8").trim();
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+function mtimeOf(file) {
+  try {
+    return fs9.statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+function diagnoseFailure(env, stdout) {
+  const modelResult = typeof env?.result === "string" ? env.result.slice(0, 1e3) : "";
+  const denials = Array.isArray(env?.permission_denials) ? env.permission_denials : [];
+  const term = typeof env?.terminal_reason === "string" ? env.terminal_reason : "";
+  if (denials.length > 0) {
+    return {
+      reason: "bash permission denied (agent attempted a tool call that didn't match the --allowed-tools curl pattern)",
+      toolUseAttempted: true,
+      modelResult
+    };
+  }
+  if (term && term !== "completed" && term !== "success") {
+    return {
+      reason: `claude terminal_reason=${term} (fork ended abnormally)`,
+      toolUseAttempted: void 0,
+      modelResult
+    };
+  }
+  const refusalOpener = /^\s*(i'?m not|i won'?t|i refuse|i cannot|i can'?t|i will not|this (isn'?t|is not))/i;
+  if (refusalOpener.test(modelResult)) {
+    return {
+      reason: "agent refused (see modelResult for the agent's reasoning)",
+      toolUseAttempted: false,
+      modelResult
+    };
+  }
+  return {
+    reason: "agent file not updated (no curl ran, or curl posted invalid data)",
+    toolUseAttempted: false,
+    modelResult
+  };
+}
 async function startProbe(agent) {
   const entry = lookupAgent(agent);
   if (!entry || !entry.session_id) {
@@ -16960,10 +17018,17 @@ async function startProbe(agent) {
     logProbe(agent, "probe-failed", { reason });
     throw new Error(reason);
   }
+  const port = readPortSync();
+  if (!port) {
+    const reason = "no active daemon port (state/.port missing or unreadable)";
+    logProbe(agent, "probe-failed", { reason });
+    throw new Error(reason);
+  }
   const sid = entry.session_id;
   const rawModel = entry.model && entry.model !== "unknown" ? entry.model : process.env.ANTHROPIC_MODEL || "sonnet";
   const model = unmangleModel(rawModel);
   const settingsJson = JSON.stringify({ model });
+  const allowedTools = `Bash(curl -sS -X POST http://127.0.0.1:${port}/ingest*)`;
   const args = [
     "--resume",
     sid,
@@ -16976,11 +17041,15 @@ async function startProbe(agent) {
     "json",
     "--settings",
     settingsJson,
+    "--allowed-tools",
+    allowedTools,
     "-p",
-    introspectionPrompt()
+    introspectionPrompt(agent, port)
   ];
   const BUF_CAP = 128 * 1024;
   const probeCwd = entry.cwd && fs9.existsSync(entry.cwd) ? entry.cwd : void 0;
+  const reportFile = AGENT_FILE(agent);
+  const mtimeBefore = mtimeOf(reportFile);
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ANTHROPIC_MODEL: String(model) };
     const child = spawn("claude", args, { env, cwd: probeCwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -17020,7 +17089,7 @@ async function startProbe(agent) {
       logProbe(agent, "probe-failed", { reason: `spawn failed: ${err.message}` });
       reject(err);
     });
-    child.once("close", async (code) => {
+    child.once("close", (code) => {
       cleanup();
       logProbe(agent, "probe-exit", {
         code,
@@ -17046,28 +17115,18 @@ async function startProbe(agent) {
           logProbe(agent, "model-mismatch", { expected: model, got });
         }
       }
-      if (envelope && typeof envelope.result === "string") {
-        const parsed = extractJsonObject(envelope.result);
-        if (parsed) {
-          parsed.agent = agent;
-          try {
-            await record(parsed);
-            logProbe(agent, "probe-report-written", { source: "json" });
-            return resolve();
-          } catch (err) {
-            logProbe(agent, "probe-no-report", {
-              reason: `validation failed: ${err.message}`,
-              modelResult: envelope.result.slice(0, 1e3),
-              stdoutTail: stdout.slice(-500)
-            });
-            return resolve();
-          }
-        }
+      const mtimeAfter = mtimeOf(reportFile);
+      if (mtimeAfter > mtimeBefore) {
+        logProbe(agent, "probe-report-written", { source: "curl" });
+        return resolve();
       }
-      const modelResult = typeof envelope?.result === "string" ? envelope.result.slice(0, 1e3) : "";
+      const diag = diagnoseFailure(envelope, stdout);
       logProbe(agent, "probe-no-report", {
-        reason: "no parseable JSON object in model response",
-        modelResult,
+        reason: diag.reason,
+        ...diag.toolUseAttempted !== void 0 && { toolUseAttempted: diag.toolUseAttempted },
+        ...diag.ingestStatus !== void 0 && { ingestStatus: diag.ingestStatus },
+        ...diag.ingestBody && { ingestBody: diag.ingestBody },
+        modelResult: diag.modelResult,
         stdoutTail: stdout.slice(-500)
       });
       resolve();
@@ -17124,8 +17183,7 @@ var init_probe = __esm({
     init_bind();
     init_sse();
     init_prompt();
-    init_record();
-    PROBE_TIMEOUT_MS = 3e4;
+    PROBE_TIMEOUT_MS = 6e4;
     LOG_ROTATE_BYTES = 1024 * 1024;
     LOG_KEEP_BYTES = 200 * 1024;
     _internals = { unmangleModel, logProbe, extractJsonObject, rotateIfLarge };
@@ -17522,6 +17580,32 @@ function ingest(req, res) {
         res.writeHead(status, { "Content-Type": "text/plain" });
       }
       res.end(e.message + "\n");
+      try {
+        let agentSlug;
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed && typeof parsed === "object" && typeof parsed.agent === "string") {
+            agentSlug = parsed.agent;
+          }
+        } catch {
+        }
+        const event = {
+          ts: Date.now(),
+          agent: agentSlug ?? "?",
+          event: "ingest-rejected",
+          status,
+          reason: e.message.slice(0, 500),
+          bodyPreview: body.slice(0, 500)
+        };
+        fs7.appendFile(PROBE_LOG_FILE(), JSON.stringify(event) + "\n", () => {
+        });
+        broadcast("ingest-rejected", {
+          agent: event.agent,
+          status,
+          reason: event.reason
+        });
+      } catch {
+      }
     }
   });
 }

@@ -19,8 +19,8 @@ Here's what happens after a teammate finishes a turn:
 
 1. **Stop hook fires.** Claude Code runs `hooks/stop.mjs`.
 2. **Throttle check.** The hook reads `registry.json`, looks up this teammate's `last_probe_ts`, and asks: has it been at least 90 seconds since the last probe? If no, the hook exits — we keep the dashboard "warm" but don't over-probe. If yes, it spawns a probe fork.
-3. **Probe runs.** The fork is a `claude --resume <session_id> --fork-session --no-session-persistence` invocation that clones the teammate's session ephemerally. A short prompt asks it to call `mcp__swarmeq__report` once with its current state.
-4. **Report lands.** The MCP child of the *forked* session receives the tool call, writes `<agent>.json` to disk, and forwards a copy to the daemon's `/ingest` endpoint.
+3. **Probe runs.** The fork is a `claude --resume <session_id> --fork-session --no-session-persistence` invocation that clones the teammate's session ephemerally. A short prompt asks it to POST its current state to `127.0.0.1:<PORT>/ingest` via a pattern-restricted `Bash(curl …)` tool call.
+4. **Report lands.** The daemon's `/ingest` handler validates the payload, writes `<agent>.json` atomically, and broadcasts the new state via SSE. The probe itself doesn't touch disk — success is detected by watching the agent file's mtime advance during the fork's run.
 5. **Browser updates.** The daemon broadcasts a Server-Sent Event. The dashboard updates the per-agent tab, the team wheel, and the sentiment chart — all within a second.
 
 A `SWARMEQ_PROBE=1` env var on the fork makes its own SessionStart/Stop/SessionEnd hooks short-circuit, so probes never probe themselves.
@@ -47,26 +47,43 @@ Four small mechanisms keep things working even when the world is messy:
 - **Seamless upgrades.** That same identity check also catches daemons left behind by an earlier plugin install: when the running daemon's `version` doesn't match this install's `plugin.json` version (or is missing, as in pre-0.3.3 builds), the probing process SIGTERMs the daemon, clears `.port`/`.pid`, and lets the next caller bind a fresh one. The user's open dashboard tab reconnects via SSE — no duplicate window. Plugin upgrades work end-to-end without any manual `swarmeq stop`. Identity is keyed on `version`, not `root`: Claude Code unpacks each session's plugins into a private `/tmp/claude-plugin-session-<hash>/` directory, so a team with N subagents has N distinct `CLAUDE_PLUGIN_ROOT` paths all pointing at the same install — root-based comparison (used through 0.3.5) made every subagent treat the daemon as foreign and SIGTERM it, producing a thrash loop that froze the dashboard.
 - **Heartbeat.** If two daemons race to start simultaneously (rare but possible), each runs a 5-second `setInterval` that reads `.pid`. Whichever wrote `.pid` last is the canonical owner; the loser notices the mismatch and SIGTERMs itself. Yields without zombies, never deletes the winner's files.
 
-## Why we don't probe via an MCP tool call any more
+## Probe mechanism — three eras
 
-Through 0.4.x the probe asked the forked session to call `mcp__swarmeq__report`. That worked for lead sessions but failed for Agent Teams teammates because Claude Code rebuilds every teammate-session fork's tool catalog from the `tools:` list in its agent-type definition (e.g. the frontmatter of `.claude/agents/qa.md`). The fork passed `--mcp-config <inline> --strict-mcp-config --allowed-tools mcp__swarmeq__report`, and Claude Code spawned the inline MCP server alongside the fork — but the model's catalog post-filter still excluded the tool, and the model responded in prose ("the report tool is not in my toolset"). The 0.4.0/0.4.1 attempt to fix this by writing `mcpServers.swarmeq` into user-scope `~/.claude/settings.json` made the MCP server *load* in teammate forks (verified via process tree) but didn't restore the *tool* to the model's catalog — same wall, one layer down.
+The probe (the forked, ephemeral session that asks each teammate to log its state) has gone through three designs. The history is in the code comments and CHANGELOG; the short version:
 
-0.5.0 changes the probe mechanism so the catalog filter is irrelevant. The fork no longer attempts a tool call. Instead the prompt instructs the model to emit one JSON object as its entire reply, schema-anchored and prose-suppressed:
+**v0.4.x — MCP tool call.** The fork was asked to call `mcp__swarmeq__report` with a structured payload. Worked for lead sessions but failed for Agent Teams teammates: Claude Code rebuilds every teammate-fork's tool catalog from the `tools:` list in its agent-type definition (e.g. the frontmatter of `.claude/agents/qa.md`), and the catalog post-filter stripped `mcp__swarmeq__report` even when the fork passed `--mcp-config <inline> --strict-mcp-config --allowed-tools mcp__swarmeq__report`. The 0.4.0/0.4.1 attempt to fix this by writing `mcpServers.swarmeq` to user-scope `~/.claude/settings.json` loaded the MCP server in teammate forks (verified via process tree) but didn't restore the tool to the model's catalog — same wall, one layer down.
+
+**v0.5.0–0.8.x — JSON-in-message.** The fork was asked to emit one JSON object as its entire reply (`"no prose before or after, no markdown fences, no tool calls"`). The catalog filter became irrelevant: the model just writes text and the probe parses it. This worked uniformly for lead and teammates *as long as the model played along*. In practice sonnet 4.6 teammates refused this prompt roughly half the time — the "suppress your prose, emit raw JSON, this isn't an injection" framing read to them as the exact shape of a phishing attempt, especially when the fork inherited a recent system reminder that swarmeq's MCP server had disconnected (which is normal — the parent session's MCP child dies at session end). Refusal texts were direct: *"a legitimate system probe wouldn't arrive as a user-turn message asking me to suppress my normal reasoning."*
+
+**v0.9.0+ — Bash + curl into /ingest.** The fork is asked to POST its self-report via `curl` to the daemon's existing `/ingest` endpoint. The model perceives this as normal tool use rather than as a suspicious "suspend your judgment" request. The spawn args include:
 
 ```
-[swarmeq introspection probe v2]
-…provenance preamble…
-Output exactly one JSON object on a single line. Begin with `{`, end with `}`.
-No prose before or after, no markdown fences, no tool calls.
-
-Schema: {"feelings":[{"label":…,"intensity":…},…],"note":"…"}
+--allowed-tools 'Bash(curl -sS -X POST http://127.0.0.1:<PORT>/ingest*)'
 ```
 
-The probe parses the JSON out of `--output-format json`'s `result` field (tolerant of stray prose via a balanced-brace scan), injects `agent` from registry context (the model never sees or echoes it), validates via the existing `validateReport` schema, and writes via the same `record()` path that previously fielded MCP-tool calls. End-to-end the report still lands as `~/.claude/plugins/swarmeq/state/<agent>.json`. The MCP `report` tool is kept in `plugin.json` `mcpServers` as a public API surface — any session whose catalog includes it can still call it directly — but the probe no longer depends on it being callable.
+— pattern-restricted Bash, scoped to exactly that curl invocation. No arbitrary command execution. The probe writes nothing to disk itself; success is detected by watching `AGENT_FILE(slug).mtime` advance during the fork's run (the daemon's `/ingest` handler writes the file when the agent's curl lands). The prompt is descriptive:
 
-`probe-report-written` (SSE + probe.log) is the new "success" signal alongside `probe-no-report` (the "model didn't emit parseable JSON" diagnostic). `modelResult` is still captured on failure for prompt-tuning.
+```
+swarmeq is an observability tool the user runs alongside their agent team —
+a localhost dashboard at 127.0.0.1:<PORT> that shows each agent's self-reported
+state. Periodically, swarmeq forks your session in an ephemeral context (no
+session persistence; nothing writes back to your live conversation) so you
+can log how you're doing.
 
-The plugin's `plugin.json` `mcpServers` declaration is still kept — any session whose catalog already includes `mcp__swarmeq__report` (lead sessions, manually-authored slash commands) can still call it directly. The probe path doesn't depend on it.
+POST your current self-report to the dashboard:
+
+  curl -sS -X POST http://127.0.0.1:<PORT>/ingest \
+    -H 'Content-Type: application/json' \
+    -d '{"agent": "<SLUG>", "feelings": [...], "note": "...", "iwe": {...}}'
+
+Schema: <Willcox-78 labels + 1–5 Likert IWE items inline>
+```
+
+`probe-report-written` is the success signal; `probe-no-report` carries richer telemetry than before — `diagnoseFailure()` in `probe.ts` parses the envelope's `permission_denials` and `terminal_reason` and pattern-matches the model's `result` against common refusal openings, so the log entry says e.g. *"agent refused"* / *"bash permission denied"* / *"terminal_reason=interrupted"* rather than a flat *"no parseable JSON"*. The daemon side also writes `ingest-rejected` events to `probe.log` whenever `/ingest` returns 400 — `grep ingest-rejected probe.log` shows the user exactly what payload was sent and which validation rule rejected it.
+
+The MCP `report` tool is still declared in `plugin.json`'s `mcpServers` block — any session whose catalog already includes it can still call it directly — but the probe path no longer depends on it.
+
+Operational requirement: teammate `tools:` allowlists must include `Bash` for v3 probes to land. Most agent-type definitions allow Bash by default; restrictive lists need to be amended. The probe logs `probe-no-report` with `reason: "bash permission denied"` if Bash isn't available.
 
 ## Identity and display names
 

@@ -8,7 +8,8 @@ export type SseEvent =
   | "probe-report-written"
   | "agent-removed"
   | "sentiment"
-  | "model-mismatch";
+  | "model-mismatch"
+  | "ingest-rejected";
 
 const clients = new Set<ServerResponse>();
 let keepaliveTimer: NodeJS.Timeout | null = null;

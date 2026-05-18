@@ -1,5 +1,34 @@
 # swarmeq changelog
 
+## 0.9.0 — probe v3: agent self-reports via Bash + curl
+
+### Changed (significant)
+- **Probe mechanism reframed as a tool call.** The v0.5.0–0.8.x JSON-emit prompt asked the forked teammate to emit one JSON object as its entire reply, with "no prose, no tool calls, nothing here writes back" framing. In production this was being refused by sonnet 4.6 teammates roughly half the time (sample from real fun-team session: opus-lead 10/10 = 100%; sonnet teammates 43–83%). The refusal texts were explicit and consistent: *"a legitimate system probe wouldn't arrive as a user-turn message asking me to suppress my normal reasoning."* The injection-shaped wording was the cause.
+
+  v3 replaces "emit JSON in your reply" with "POST your self-report via curl to the local dashboard". The fork is spawned with `--allowed-tools "Bash(curl -sS -X POST http://127.0.0.1:<PORT>/ingest*)"` — a pattern-restricted Bash that only permits this exact curl invocation. The new prompt is descriptive (`"swarmeq is an observability tool the user runs alongside their agent team — a localhost dashboard at 127.0.0.1:<PORT> that shows each agent's self-reported state"`) and lists the curl command, schema, Willcox-78 labels, and IWE items inline. The model perceives this as normal tool-use rather than as a "suspend your judgment" injection attempt.
+
+  Success is detected by the probe watching `AGENT_FILE(slug).mtime` advance during the fork's run (the daemon's existing `/ingest` writes the file in response to the agent's curl). No new endpoints; no schema changes.
+
+### Added
+- **Richer probe-no-report telemetry**. The probe now categorizes failure modes via a new `diagnoseFailure()` helper instead of a flat "no parseable JSON" string:
+  - `bash permission denied` — set when the envelope's `permission_denials` array is non-empty (the agent attempted a tool call that didn't match the allowed-tools pattern, or the agent-type's `tools:` list doesn't include Bash)
+  - `agent refused` — set when the model's `result` text opens with a refusal pattern (`I'm not / I won't / I cannot / I refuse / I will not / this isn't`)
+  - `terminal_reason=<x>` — set when the envelope's `terminal_reason` indicates abnormal termination
+  - `no curl ran, or curl posted invalid data` — generic fallback
+  - `toolUseAttempted` (boolean) — surfaced separately so the user can tell at a glance whether the model even tried to call Bash
+  - `modelResult` — first 1000 chars of the agent's final reply, captured for every failure path
+- **`ingest-rejected` events** appended to `probe.log` and broadcast via SSE whenever `/ingest` returns 400. Each entry includes the offending agent slug (from the payload), the validation error message, and a 500-char preview of the raw body. Closes the diagnostic loop on the daemon side: when an agent's curl posts a malformed payload, the user can now `grep ingest-rejected probe.log` to see *exactly* what was sent and why it was rejected. Previously this information was only visible to the agent itself (in the curl response body), never reaching the user's diagnostic surface.
+
+### Architecture
+- Probe spawn args now: `--resume` `--fork-session` `--no-session-persistence` `--print` `--model <pinned>` `--output-format json` `--settings '{model:...}'` `--allowed-tools "Bash(curl …)"` `-p <prompt>`. Drops `--mcp-config` and `--strict-mcp-config` (no MCP needed for v3). Timeout bumped 30s → 60s to account for the model running an extra turn for tool use.
+- The `extractJsonObject` helper is retained in `_internals` for diagnostics and external tools; the probe itself no longer depends on it for success detection.
+
+### Tests
+- 16 new probe + prompt tests including 3 full end-to-end integration tests that exercise the complete pipeline: fake claude → real `curl` → real `/ingest handle` (via `withHttpServer`) → real `validateReport` + `record` → real `AGENT_FILE`. The integration tests catch wiring bugs that pure-mock tests miss (validates that `agent` field round-trips, `iwe` round-trips, validation errors surface as `ingest-rejected`, dead-port → no crash). 126 tests pass on Node 22+.
+
+### Operational note
+- Teammate `tools:` allowlists must include `Bash` for v3 probes to land. Most agent-type definitions allow Bash by default; if a teammate has a restrictive `tools:` list that excludes Bash, the probe will log `probe-no-report` with `reason: "bash permission denied"` and the user can amend the agent-type definition. No silent fallback; no auto-reinstatement of v0.5.0 emit-JSON behavior.
+
 ## 0.8.2 — engagement panel polish + citations moved to page footer
 
 ### Fixed

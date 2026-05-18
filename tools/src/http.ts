@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { dashboardFile, feelingsFile, iweFile, pluginRoot, pluginVersion, readRegistry } from "./paths.ts";
+import { dashboardFile, feelingsFile, iweFile, pluginRoot, pluginVersion, PROBE_LOG_FILE, readRegistry } from "./paths.ts";
 
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -157,6 +157,33 @@ function ingest(req: IncomingMessage, res: ServerResponse): void {
         res.writeHead(status, { "Content-Type": "text/plain" });
       }
       res.end(e.message + "\n");
+      // Telemetry: log every rejected /ingest to probe.log + SSE so users
+      // can see *what* the model sent that was wrong. Crucial for the
+      // v0.9.0 curl path: when an agent's curl returns 400, the only
+      // diagnostic surface is the agent's own stdout, which doesn't reach
+      // probe.log. Adding it here means `grep ingest-rejected probe.log`
+      // shows the exact payload + validation error.
+      try {
+        let agentSlug: string | undefined;
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed && typeof parsed === "object" && typeof parsed.agent === "string") {
+            agentSlug = parsed.agent;
+          }
+        } catch { /* body wasn't even JSON */ }
+        const event = {
+          ts: Date.now(),
+          agent: agentSlug ?? "?",
+          event: "ingest-rejected" as const,
+          status,
+          reason: e.message.slice(0, 500),
+          bodyPreview: body.slice(0, 500),
+        };
+        fs.appendFile(PROBE_LOG_FILE(), JSON.stringify(event) + "\n", () => {});
+        broadcast("ingest-rejected", {
+          agent: event.agent, status, reason: event.reason,
+        });
+      } catch { /* best-effort telemetry */ }
     }
   });
 }

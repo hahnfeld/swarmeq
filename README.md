@@ -52,12 +52,12 @@ That's it. No buttons to push, no commands to remember.
 
 ```bash
 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
-  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.8.2.zip
+  claude --plugin-url https://github.com/hahnfeld/swarmeq/releases/latest/download/swarmeq-v0.9.0.zip
 # inside the session:
 /swarmeq:swarmeq-dashboard   # opens http://127.0.0.1:7777 in your browser
 ```
 
-Teammate dashboards work out of the box — no per-agent config, no settings.json edit, no extra setup commands. The probe asks each agent for a JSON-shaped self-report (not an MCP tool call), so the tool catalog filter that Agent Teams applies to teammates is irrelevant. See `docs/ARCHITECTURE.md` for the deeper explanation if you're curious why this is the architecture.
+Teammate dashboards work out of the box — no per-agent config, no settings.json edit, no extra setup commands. The probe asks each agent to log its self-report via a single pattern-restricted `Bash(curl …)` call to the daemon's localhost `/ingest` endpoint, so the MCP-tool catalog filter that Agent Teams applies to teammates is irrelevant. Requirement: the teammate's agent-type `tools:` allowlist must include `Bash`. See `docs/ARCHITECTURE.md` for the design history (v0.4.x MCP-call → v0.5.0 JSON-in-message → v0.9.0 curl-into-/ingest) and why this is the architecture.
 
 **From source** (for contributors):
 
@@ -86,20 +86,19 @@ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --plugin-dir ./swarmeq
 
 When Claude Code starts a session, it spawns `node server/swarmeq.mjs mcp` as the plugin's MCP server, and the SessionStart hook forks a detached **daemon** that owns port 7777 and serves the dashboard HTTP+SSE channel. The daemon outlives any individual session — start a session, close it, the daemon keeps running. Every MCP child discovers the active port and forwards reports to the daemon's `/ingest` endpoint.
 
-The `mcp__swarmeq__report` tool accepts a strict schema: 1–4 feelings whose labels must come from the curated 78-entry Willcox 1982 set, each with an intensity in [0,1], plus an optional ≤200-char note.
+Reports use a strict schema: 1–4 feelings whose labels must come from the curated 78-entry Willcox 1982 set, each with an intensity in [0,1], plus an optional ≤200-char note, plus an optional 5-item Intrinsic Work Experience block (1–5 Likert).
 
 On every Stop hook the plugin spawns a per-agent probe (rate-limited to one per 90s per agent):
 
 ```
 claude --resume <SID> --fork-session --no-session-persistence
        --print --model <pinned> --output-format json
-       --mcp-config <inline> --strict-mcp-config
-       --allowed-tools mcp__swarmeq__report
        --settings '{"model":"<pinned>"}'
+       --allowed-tools 'Bash(curl -sS -X POST http://127.0.0.1:<PORT>/ingest*)'
        -p "<introspection prompt>"
 ```
 
-The fork inherits the teammate's full context, calls the tool exactly once, and exits without persisting. The model is pinned three ways (`--model`, `ANTHROPIC_MODEL`, and `--settings`) so the probe never silently downgrades. `SWARMEQ_PROBE=1` is set on the fork's env so its own SessionStart/Stop/SessionEnd hooks short-circuit — no probe-of-a-probe recursion.
+The fork inherits the teammate's full context, runs a single `curl` POST to the daemon's `/ingest`, and exits. The `--allowed-tools` pattern scopes `Bash` to exactly that endpoint — no arbitrary command execution. The model is pinned three ways (`--model`, `ANTHROPIC_MODEL`, and `--settings`) so the probe never silently downgrades. `SWARMEQ_PROBE=1` is set on the fork's env so its own SessionStart/Stop/SessionEnd hooks short-circuit — no probe-of-a-probe recursion.
 
 ## The 78-entry Willcox 1982 taxonomy
 
@@ -128,7 +127,7 @@ node tools/build.mjs                  # → server/swarmeq.mjs + hooks/*.mjs
 
 Sources are TypeScript (`tools/src/**/*.ts`). esbuild produces a ~600 KB ESM server bundle plus one self-contained bundle per hook; `tsc` is only used for type-checking and never emits to disk.
 
-## Status: 0.8.2
+## Status: 0.9.0
 
 Tested on macOS ARM. The plugin works end-to-end on this platform. Linux / Windows / WSL paths exist in the code (browser-open shim, `path.join`, etc.) but are not smoke-tested — file issues if anything breaks.
 
