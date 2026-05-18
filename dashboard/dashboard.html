@@ -1614,8 +1614,10 @@ function renderEventLog() {
     });
     prev = c;
   }
-  // Newest first reads more naturally for "what just changed."
-  events.reverse();
+  // Chronological order (oldest at top, newest at bottom) so the log reads
+  // left-to-right with the chart's time axis. The container auto-scrolls
+  // to the bottom on each render so the most recent event is always
+  // visible without manual scrolling.
   for (const ev of events) {
     const li = document.createElement("li");
     const time = document.createElement("span"); time.className = "ev-time";
@@ -1635,6 +1637,8 @@ function renderEventLog() {
     li.append(time, sign, name, count);
     log.appendChild(li);
   }
+  // Pin to the latest event. Done after layout so scrollHeight is final.
+  log.scrollTop = log.scrollHeight;
 }
 
 function coreForLabel(label) {

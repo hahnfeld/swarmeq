@@ -1,5 +1,10 @@
 # swarmeq changelog
 
+## 0.7.1 — event log: chronological order, auto-scroll to latest
+
+### Changed
+- Event log under the chart now renders events in chronological order (oldest at top, newest at bottom) so the log reads left-to-right with the chart's time axis. The container auto-scrolls to the bottom on each refresh, so the most recent event is always visible without manual scrolling. Previously the log was newest-first with no auto-scroll, which meant new events at the bottom of the visible area went out of view as the window grew.
+
 ## 0.7.0 — chart polish: per-segment trace coloring, 4-hour window, event log
 
 ### Fixed
